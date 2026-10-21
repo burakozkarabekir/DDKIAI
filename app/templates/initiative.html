@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import health, comments_block, upload_form %}
+{% block title %}{{ i.name }}{% endblock %}
+{% block crumbs %}<a href="/guvenlik">AI Security</a> / {{ i.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <div class="row" style="margin-bottom:6px"><span class="badge">{{ 'Platform' if i.category == 'platform' else 'Güvenlik' }}</span>{{ health(i.health) }}</div>
+  <h1>{{ i.name }}</h1><p>{{ i.description }}</p>
+  <p class="small muted">Sorumlu: {{ i.owner or '—' }} · Durum: {{ i.status or '—' }}</p></div></div>
+{% if metric_charts %}
+<div class="grid g3" style="margin-bottom:16px">
+  {% for m in metric_charts %}<div class="card metric-card"><div class="small muted">{{ m.label }}</div><div class="value">{{ m.last|num }}{{ '%' if m.unit == '%' else ' ' ~ m.unit }}</div>{{ m.chart }}</div>{% endfor %}
+</div>{% endif %}
+<div class="grid g-main">
+  <div class="card"><h2>Yorumlar & tartışma</h2>{{ comments_block(comments, 'initiative', i.id, user) }}</div>
+  <div class="stack">
+    <div class="card"><h2>Dokümanlar & kullanım raporları</h2>
+      {% if user.role in D.CAN_UPLOAD %}{{ upload_form(initiative_id=i.id) }}{% endif %}
+      <ul class="list-plain" style="margin-top:8px">{% for d in docs %}<li><a href="/dokuman/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ d.category }} · {{ d.uname }} · {{ d.uploaded_at|date }}</div></li>{% else %}<li class="muted small">Doküman yok.</li>{% endfor %}</ul>
+    </div>
+    {% if user.role in D.CAN_EDIT %}
+    <div class="card"><h2>Girişimi düzenle</h2>
+      <form method="post" action="/guvenlik/{{ i.slug }}">
+        <div class="field"><label>Ad</label><input name="name" value="{{ i.name }}" required></div>
+        <div class="field"><label>Açıklama</label><textarea name="description">{{ i.description or '' }}</textarea></div>
+        <div class="field"><label>Sorumlu</label><input name="owner" value="{{ i.owner or '' }}"></div>
+        <div class="field"><label>Durum</label><input name="status" value="{{ i.status or '' }}"></div>
+        <div class="field"><label>Sağlık</label><select name="health">{% for k, v in D.HEALTH.items() %}<option value="{{ k }}" {{ 'selected' if i.health == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Kategori</label><select name="category"><option value="guvenlik" {{ 'selected' if i.category == 'guvenlik' }}>Güvenlik</option><option value="platform" {{ 'selected' if i.category == 'platform' }}>Platform</option></select></div>
+        <button class="btn primary sm">Kaydet</button>
+      </form>
+    </div>{% endif %}
+  </div>
+</div>
+{% endblock %}

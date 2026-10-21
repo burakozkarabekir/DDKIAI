@@ -1,0 +1,51 @@
+{% from "partials/macros.html" import icon %}
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · {{ APP_NAME }}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Ctext x='16' y='21' font-size='13' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'%3EAI%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<div class="shell">
+  <nav class="nav">
+    <div class="brand"><div class="brand-mark">AI</div><div><b>{{ APP_NAME }}</b><span>{{ ORG_NAME }}</span></div></div>
+    {% set internal = user.role != 'dt' %}
+    <div class="nav-section">Takip</div>
+    {% if internal %}<a href="/" class="{{ 'active' if path == '/' }}">{{ icon('home') }} Yönetici Özeti</a>{% endif %}
+    <a href="/projeler" class="{{ 'active' if path.startswith('/projeler') }}">{{ icon('grid') }} Projeler</a>
+    <a href="/raporlar" class="{{ 'active' if path.startswith('/raporlar') }}">{{ icon('file') }} Haftalık Raporlar</a>
+    {% if internal %}<a href="/aksiyonlar" class="{{ 'active' if path.startswith('/aksiyon') }}">{{ icon('check') }} Aksiyonlar</a>{% endif %}
+    <a href="/dokumanlar" class="{{ 'active' if path.startswith('/dokuman') }}">{{ icon('folder') }} Doküman Kütüphanesi</a>
+    {% if internal %}
+    <div class="nav-section">Danışmanlık</div>
+    <a href="/danisman" class="{{ 'active' if path.startswith('/danisman') }}">{{ icon('spark') }} AI Danışman</a>
+    <a href="/kurumsal-yapi" class="{{ 'active' if path.startswith('/kurumsal') }}">{{ icon('org') }} Kurumsal Yapı</a>
+    <a href="/guvenlik" class="{{ 'active' if path.startswith('/guvenlik') }}">{{ icon('shield') }} AI Security</a>
+    {% endif %}
+    <div class="nav-section">Yönetişim</div>
+    <a href="/surec" class="{{ 'active' if path.startswith('/surec') }}">{{ icon('flow') }} Süreç & Kurallar</a>
+    {% if user.role == 'admin' %}<a href="/yonetim" class="{{ 'active' if path.startswith('/yonetim') }}">{{ icon('cog') }} Yönetim</a>{% endif %}
+    <div class="nav-foot">
+      <div class="who">{{ user.name }}</div>
+      <div class="muted small" style="color:inherit;opacity:.7">{{ D.ROLES[user.role] }} · {{ user.organization }}</div>
+      <div class="ai-pill {{ 'live' if ai_live() }}" title="AI bağlantısı"><i></i>{{ ai_label() }}</div>
+      <div style="margin-top:10px"><a href="#" data-theme-toggle>Tema</a> · <a href="/cikis">Çıkış</a></div>
+    </div>
+  </nav>
+  <main class="main">
+    <div class="topbar">
+      <div class="row"><button class="btn sm menu-btn" data-menu type="button">☰ Menü</button><div class="crumbs">{% block crumbs %}{% endblock %}</div></div>
+      <div class="row">{% block topactions %}{% endblock %}</div>
+    </div>
+    <div class="content">
+      {% if flash %}<div class="flash {{ flash.kind }}">{{ flash.message }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ i.title }}{% endblock %}
+{% block crumbs %}<a href="/danisman">AI Danışman</a> / İçgörü{% endblock %}
+{% block topactions %}<a class="btn" href="#" data-print>Yazdır / PDF</a>{% endblock %}
+{% block content %}
+<div class="card" style="max-width:980px">
+  <h1>{{ i.title }}</h1>
+  <p class="muted small">{{ i.created_at|date }} · {{ i.uname or 'Sistem' }} · {{ ai_label() }}</p>
+  <hr>
+  <div class="prose">{{ i.body|md }}</div>
+</div>
+{% endblock %}

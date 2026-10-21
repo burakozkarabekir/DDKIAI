@@ -1,0 +1,64 @@
+{% macro icon(name) -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'home' %}<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>
+{%- elif name == 'grid' %}<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+{%- elif name == 'file' %}<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>
+{%- elif name == 'check' %}<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>
+{%- elif name == 'folder' %}<path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>
+{%- elif name == 'spark' %}<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7z"/>
+{%- elif name == 'org' %}<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>
+{%- elif name == 'shield' %}<path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>
+{%- elif name == 'flow' %}<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 6h10M6 8l5 8M18 8l-5 8"/>
+{%- elif name == 'cog' %}<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+{%- endif %}</svg>
+{%- endmacro %}
+
+{% macro health(h) -%}
+<span class="health {{ h }}">{{ D.HEALTH.get(h, ('—',))[0] }}</span>
+{%- endmacro %}
+
+{% macro stage(s) -%}
+<span class="badge stage">{{ D.STAGE_LABELS.get(s, s) }}</span>
+{%- endmacro %}
+
+{% macro risk(score) -%}
+{% if score is none %}<span class="muted">—</span>{% else %}<span class="risk {{ 'hi' if score >= 60 else 'mid' if score >= 35 else 'lo' }}" title="AI takılma riski (0-100)">{{ score }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro initials(name) -%}{% for part in (name or '?').split()[:2] %}{{ part[0] }}{% endfor %}{%- endmacro %}
+
+{% macro comments_block(comments, target_type, target_id, user) %}
+<form method="post" action="/yorum" class="field">
+  <input type="hidden" name="target_type" value="{{ target_type }}">
+  <input type="hidden" name="target_id" value="{{ target_id }}">
+  <textarea name="body" placeholder="Yorum, soru ya da karar notu yazın… (Markdown desteklenir)" required></textarea>
+  <div class="row" style="margin-top:8px"><span class="muted small">Yorumlar proje ekibi{% if target_type == 'project' %}, DT{% endif %} ve yönetim tarafından görülür.</span><span class="spacer"></span><button class="btn primary sm">Yorum ekle</button></div>
+</form>
+{% for c in comments %}
+<div class="comment {{ 'ai' if c.kind == 'ai' }}">
+  <div class="avatar {{ 'ai' if c.kind == 'ai' else 'dt' if c.urole == 'dt' }}">{{ 'AI' if c.kind == 'ai' else initials(c.uname) }}</div>
+  <div>
+    <div class="who">{% if c.kind == 'ai' %}AI Danışman <span>· {{ c.uname }} istedi</span>{% else %}{{ c.uname }} <span>· {{ c.organization }}</span>{% endif %}
+      <span>· {{ c.created_at|ago }}</span>
+      {% if c.kind == 'durum' %}<span class="badge">Durum</span>{% elif c.kind == 'trello' %}<span class="badge">Trello</span>{% endif %}
+      {% if c.user_id == user.id or user.role == 'admin' %}
+      <form method="post" action="/yorum/{{ c.id }}/sil" style="display:inline" data-confirm="Yorum silinsin mi?"><button class="btn ghost sm" title="Sil">Sil</button></form>{% endif %}
+    </div>
+    <div class="body prose">{{ c.body|md }}</div>
+  </div>
+</div>
+{% else %}
+<div class="empty">Henüz yorum yok. İlk yorumu siz yazın.</div>
+{% endfor %}
+{% endmacro %}
+
+{% macro upload_form(project_id=None, initiative_id=None) %}
+<form method="post" action="/dokuman" enctype="multipart/form-data" class="row" style="align-items:flex-end">
+  {% if project_id %}<input type="hidden" name="project_id" value="{{ project_id }}">{% endif %}
+  {% if initiative_id %}<input type="hidden" name="initiative_id" value="{{ initiative_id }}">{% endif %}
+  <div style="flex:2;min-width:180px"><label>Dosya</label><input type="file" name="file" required></div>
+  <div style="flex:2;min-width:160px"><label>Başlık</label><input name="title" placeholder="Boş bırakılırsa dosya adı"></div>
+  <div style="flex:1;min-width:160px"><label>Kategori</label><select name="category">{% for c in D.DOC_CATEGORIES %}<option>{{ c }}</option>{% endfor %}</select></div>
+  <button class="btn primary" data-busy="Yükleniyor…">Yükle</button>
+</form>
+{% endmacro %}

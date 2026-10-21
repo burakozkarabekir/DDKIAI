@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import health, stage, risk %}
+{% block title %}Projeler{% endblock %}
+{% block crumbs %}AI Impact portföyü · {{ projects|length }} proje{% endblock %}
+{% block topactions %}
+{% if user.role in D.CAN_EDIT %}<a class="btn primary" href="/projeler/yeni">+ Yeni proje</a>{% endif %}
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Projeler</h1><p>Her proje bir kartta: aşama, sağlık, ölçümleme ve son durum. Kartı açıp detay, doküman ve yorumlara ulaşın.</p></div>
+  <div class="seg">
+    {% set qs = 'q=' ~ filters.q ~ '&stage=' ~ filters.stage ~ '&health=' ~ filters.health ~ '&alan=' ~ filters.alan ~ '&olcum=' ~ filters.olcum %}
+    <a href="?view=pano&{{ qs }}" class="{{ 'on' if view == 'pano' }}">Pano</a>
+    <a href="?view=liste&{{ qs }}" class="{{ 'on' if view == 'liste' }}">Liste</a>
+  </div>
+</div>
+<form class="filters" method="get">
+  <input type="hidden" name="view" value="{{ view }}">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Ara: ad, kod, marka, birim…">
+  <select name="stage" data-autosubmit><option value="">Tüm aşamalar</option>{% for k, l, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if filters.stage == k }}>{{ l }}</option>{% endfor %}</select>
+  <select name="health" data-autosubmit><option value="">Tüm sağlık</option>{% for k, v in D.HEALTH.items() %}<option value="{{ k }}" {{ 'selected' if filters.health == k }}>{{ v[0] }}</option>{% endfor %}</select>
+  <select name="alan" data-autosubmit><option value="">Tüm değer zinciri</option>{% for a in D.VALUE_CHAIN %}<option {{ 'selected' if filters.alan == a }}>{{ a }}</option>{% endfor %}</select>
+  <select name="olcum" data-autosubmit><option value="">Tüm ölçümleme</option>{% for k, l in D.MEASUREMENT %}<option value="{{ k }}" {{ 'selected' if filters.olcum == k }}>{{ l }}</option>{% endfor %}</select>
+  <button class="btn">Filtrele</button>
+  {% if filters.q or filters.stage or filters.health or filters.alan or filters.olcum %}<a class="btn ghost" href="?view={{ view }}">Temizle</a>{% endif %}
+</form>
+
+{% if view == 'pano' %}
+<div class="board">
+  {% for key, label, desc in D.STAGES + D.SIDE_STAGES %}
+  {% set col = projects|selectattr('stage', 'equalto', key)|list %}
+  {% if col or key not in ('beklemede', 'iptal') %}
+  <div class="column">
+    <div class="column-head" title="{{ desc }}"><span>{{ label }}</span><span class="n">{{ col|length }}</span></div>
+    {% for p in col %}
+    <a class="pcard {{ p.health }}" href="/projeler/{{ p.id }}">
+      <div class="row"><span class="code">{{ p.code }}</span><span class="spacer"></span>{{ health(p.health) }}</div>
+      <div class="t">{{ p.name }}</div>
+      <div class="meta">
+        <span>{{ p.value_chain or 'Alan yok' }}</span>
+        {% if p.target_date %}<span class="{{ 'health kirmizi' if p.target_date|overdue and p.stage not in ('canli','olcekleme') }}">⏱ {{ p.target_date|date }}</span>{% endif %}
+      </div>
+      <div class="meta" style="margin-top:6px">
+        <span title="Ölçümleme">📏 {{ D.MEASUREMENT_LABELS[p.measurement_status] }}</span>
+        {% if counts.get(p.id) %}<span title="Yorum">💬 {{ counts[p.id] }}</span>{% endif %}
+        {% if docs.get(p.id) %}<span title="Doküman">📎 {{ docs[p.id] }}</span>{% endif %}
+        {% if p.ai_risk_score is not none and user.role != 'dt' %}<span title="AI risk skoru">Risk {{ risk(p.ai_risk_score) }}</span>{% endif %}
+      </div>
+    </a>
+    {% else %}<div class="muted small" style="padding:6px">Boş</div>{% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% else %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Kod</th><th>Proje</th><th>Aşama</th><th>Sağlık</th>{% if user.role != 'dt' %}<th>Risk</th>{% endif %}<th>Ölçümleme</th><th>Değer zinciri</th><th>DT sorumlusu</th><th>Hedef</th><th class="num">Tahmini değer</th><th>Son durum</th></tr></thead>
+  <tbody>
+  {% for p in projects %}
+  <tr>
+    <td class="code">{{ p.code }}</td>
+    <td><a href="/projeler/{{ p.id }}"><b>{{ p.name }}</b></a><div class="small muted">{{ p.business_unit or '' }}</div></td>
+    <td>{{ stage(p.stage) }}</td><td>{{ health(p.health) }}</td>
+    {% if user.role != 'dt' %}<td>{{ risk(p.ai_risk_score) }}</td>{% endif %}
+    <td class="small">{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</td>
+    <td class="small">{{ p.value_chain or '—' }}</td><td class="small">{{ p.dt_lead or '—' }}</td>
+    <td class="small nowrap">{{ p.target_date|date }}</td><td class="num small">{{ p.estimated_value|money }}</td>
+    <td class="small nowrap">{{ p.last_status_at|ago }}</td>
+  </tr>
+  {% else %}<tr><td colspan="11" class="empty">Filtreye uyan proje yok.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

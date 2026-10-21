@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Aksiyonlar{% endblock %}
+{% block crumbs %}Komite ve proje kararlarından doğan aksiyonlar{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Aksiyonlar</h1><p>Haftalık değerlendirme ve yönlendirme komitesinden çıkan, sahibi ve termini olan işler. Geciken aksiyonlar yönetici özetinde görünür.</p></div>
+<div class="seg">{% for k, l in [('acik','Açık'),('kapali','Kapanan'),('hepsi','Tümü')] %}<a href="?durum={{ k }}" class="{{ 'on' if durum == k }}">{{ l }}</a>{% endfor %}</div></div>
+{% if user.role in D.CAN_EDIT %}
+<form method="post" action="/aksiyonlar" class="card row" style="align-items:flex-end;margin-bottom:16px">
+  <div style="flex:3;min-width:220px"><label>Aksiyon</label><input name="title" required></div>
+  <div style="flex:2;min-width:180px"><label>Proje</label><select name="project_id"><option value="">Genel / Portföy</option>{% for p in projects %}<option value="{{ p.id }}">{{ p.code }} · {{ p.name }}</option>{% endfor %}</select></div>
+  <div style="flex:1;min-width:140px"><label>Sorumlu</label><input name="owner"></div>
+  <div style="flex:1;min-width:140px"><label>Termin</label><input type="date" name="due_date"></div>
+  <button class="btn primary">Ekle</button>
+</form>{% endif %}
+<div class="table-wrap"><table>
+  <thead><tr><th></th><th>Aksiyon</th><th>Proje</th><th>Sorumlu</th><th>Termin</th><th>Kaynak</th></tr></thead>
+  <tbody>{% for a in actions %}
+  <tr><td><form method="post" action="/aksiyon/{{ a.id }}/durum">{% if user.role in D.CAN_UPLOAD %}<button class="btn sm">{{ '✓' if a.status == 'acik' else '↺' }}</button>{% endif %}</form></td>
+    <td style="{{ 'text-decoration:line-through;color:var(--muted)' if a.status == 'kapali' }}">{{ a.title }}</td>
+    <td class="small">{% if a.project_id %}<a href="/projeler/{{ a.project_id }}?tab=aksiyon"><span class="code">{{ a.code }}</span> {{ a.pname }}</a>{% else %}Genel{% endif %}</td>
+    <td class="small">{{ a.owner or '—' }}</td>
+    <td class="small nowrap {{ 'health kirmizi' if a.status == 'acik' and a.due_date|overdue }}">{{ a.due_date|date }}</td><td class="small muted">{{ a.source or '' }}</td></tr>
+  {% else %}<tr><td colspan="6" class="empty">Aksiyon yok.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

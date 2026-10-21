@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import upload_form %}
+{% block title %}Doküman Kütüphanesi{% endblock %}
+{% block crumbs %}{{ docs|length }} doküman · {{ reports|length }} haftalık rapor{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Doküman Kütüphanesi</h1><p>Tüm projelerin ve girişimlerin dokümanları tek yerde. Arama doküman içeriğinde de yapılır.</p></div></div>
+<form class="filters" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Başlık, dosya adı veya içerikte ara…">
+  <select name="kategori" data-autosubmit><option value="">Tüm kategoriler</option>{% for c in D.DOC_CATEGORIES %}<option {{ 'selected' if kategori == c }}>{{ c }}</option>{% endfor %}</select>
+  <button class="btn">Ara</button>
+</form>
+{% if user.role in D.CAN_UPLOAD %}
+<details class="card inline" style="margin-bottom:16px"><summary><b>+ Projeye doküman yükle</b></summary>
+  <form method="post" action="/dokuman" enctype="multipart/form-data" class="row" style="align-items:flex-end;margin-top:12px">
+    <div style="flex:2;min-width:200px"><label>Proje</label><select name="project_id" required>{% for p in projects %}<option value="{{ p.id }}">{{ p.code }} · {{ p.name }}</option>{% endfor %}</select></div>
+    <div style="flex:2;min-width:180px"><label>Dosya</label><input type="file" name="file" required></div>
+    <div style="flex:2;min-width:160px"><label>Başlık</label><input name="title"></div>
+    <div style="flex:1;min-width:160px"><label>Kategori</label><select name="category">{% for c in D.DOC_CATEGORIES %}<option>{{ c }}</option>{% endfor %}</select></div>
+    <button class="btn primary">Yükle</button>
+  </form>
+</details>{% endif %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Doküman</th><th>Bağlı olduğu</th><th>Kategori</th><th>Yükleyen</th><th>Tarih</th><th class="num">Boyut</th></tr></thead>
+  <tbody>{% for d in docs %}
+  <tr><td><a href="/dokuman/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ d.filename }}</div></td>
+    <td class="small">{% if d.project_id %}<a href="/projeler/{{ d.project_id }}?tab=dokuman"><span class="code">{{ d.code }}</span> {{ d.pname }}</a>{% elif d.initiative_id %}<a href="/guvenlik/{{ d.slug }}">{{ d.iname }}</a>{% else %}—{% endif %}</td>
+    <td class="small">{{ d.category }}</td><td class="small">{{ d.uname }}</td><td class="small nowrap">{{ d.uploaded_at|date }}</td><td class="num small">{{ ((d.size or 0) / 1024)|round|int }} KB</td></tr>
+  {% else %}<tr><td colspan="6" class="empty">Doküman bulunamadı.</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% if reports %}
+<h2 style="margin-top:24px">Haftalık raporlar</h2>
+<div class="table-wrap"><table><thead><tr><th>Hafta</th><th>Rapor</th><th>Dosya</th></tr></thead><tbody>
+{% for r in reports %}<tr><td class="nowrap">{{ r.week_start|date }}</td><td><a href="/raporlar/{{ r.id }}">{{ r.title }}</a></td><td class="small">{% if r.filename %}<a href="/raporlar/{{ r.id }}/dosya">{{ r.filename }}</a>{% else %}metin{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% endblock %}

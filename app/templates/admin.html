@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Yönetim{% endblock %}
+{% block crumbs %}Kullanıcılar, Trello aktarımı ve işlem kaydı{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Yönetim</h1></div></div>
+{% if preview %}
+<div class="card" style="margin-bottom:16px">
+  <h2>Trello aktarım önizlemesi · {{ preview.board }}</h2>
+  <p class="small">{{ preview.card_count }} açık kart bulundu. Her Trello listesinin hangi aşamaya karşılık geldiğini kontrol edin. Yorumlar ve ek linkleri projeye taşınır.</p>
+  <form method="post" action="/yonetim/trello/aktar">
+    <table style="max-width:640px"><thead><tr><th>Trello listesi</th><th class="num">Kart</th><th>Aşama</th></tr></thead><tbody>
+    {% for l in preview.lists %}<tr><td>{{ l.name }}</td><td class="num">{{ l.count }}</td><td><select name="stage_{{ l.id }}">{% for k, lab, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if k == l.stage }}>{{ lab }}</option>{% endfor %}</select></td></tr>{% endfor %}
+    </tbody></table>
+    <div class="row" style="margin-top:12px"><button class="btn primary">İçe aktar</button><a class="btn ghost" href="/yonetim">Vazgeç</a></div>
+  </form>
+</div>
+{% endif %}
+<div class="grid g-main">
+  <div class="stack">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Kullanıcı</th><th>Kurum</th><th>Rol</th><th>Son giriş</th><th></th></tr></thead>
+        <tbody>{% for u in users %}
+        <tr style="{{ 'opacity:.5' if not u.active }}">
+          <td><b>{{ u.name }}</b><div class="small muted">{{ u.email }}{% if u.title %} · {{ u.title }}{% endif %}</div></td>
+          <td class="small">{{ u.organization }}</td><td class="small">{{ D.ROLES[u.role] }}</td><td class="small">{{ u.last_login|ago }}</td>
+          <td class="nowrap">
+            <details class="inline"><summary class="btn sm">Düzenle</summary>
+              <form method="post" action="/yonetim/kullanici" style="margin-top:8px;min-width:260px">
+                <input type="hidden" name="user_id" value="{{ u.id }}">
+                <div class="field"><label>Ad</label><input name="name" value="{{ u.name }}" required></div>
+                <div class="field"><label>E-posta</label><input name="email" value="{{ u.email }}" required></div>
+                <div class="field"><label>Unvan</label><input name="title" value="{{ u.title or '' }}"></div>
+                <div class="field"><label>Kurum</label><select name="organization">{% for o in ['Doğuş Otomotiv','Doğuş Teknoloji','Doğuş Grubu'] %}<option {{ 'selected' if u.organization == o }}>{{ o }}</option>{% endfor %}</select></div>
+                <div class="field"><label>Rol</label><select name="role">{% for k, v in D.ROLES.items() %}<option value="{{ k }}" {{ 'selected' if u.role == k }}>{{ v }}</option>{% endfor %}</select></div>
+                <div class="field"><label>Yeni parola (opsiyonel)</label><input name="password" type="password" autocomplete="new-password"></div>
+                <button class="btn primary sm">Kaydet</button>
+              </form>
+            </details>
+            {% if u.id != user.id %}<form method="post" action="/yonetim/kullanici/{{ u.id }}/durum" style="display:inline"><button class="btn ghost sm">{{ 'Pasifleştir' if u.active else 'Aktifleştir' }}</button></form>{% endif %}
+          </td>
+        </tr>{% endfor %}</tbody>
+      </table>
+    </div>
+    {% if log %}
+    <div class="card"><h2>İşlem kaydı</h2>
+      <ul class="list-plain small">{% for a in log %}<li class="row"><span class="muted nowrap">{{ a.at|ago }}</span><b>{{ a.uname or 'Sistem' }}</b><span>{{ a.action }}</span><span class="muted">{{ a.detail or '' }}</span>{% if a.target_type == 'project' and a.target_id %}<a href="/projeler/{{ a.target_id }}">→</a>{% endif %}</li>{% endfor %}</ul>
+    </div>{% endif %}
+  </div>
+  <div class="stack">
+    <div class="card"><h2>Kullanıcı ekle</h2>
+      <form method="post" action="/yonetim/kullanici">
+        <div class="field"><label>Ad soyad</label><input name="name" required></div>
+        <div class="field"><label>E-posta</label><input name="email" type="email" required></div>
+        <div class="field"><label>Unvan</label><input name="title"></div>
+        <div class="field"><label>Kurum</label><select name="organization"><option>Doğuş Otomotiv</option><option>Doğuş Teknoloji</option><option>Doğuş Grubu</option></select></div>
+        <div class="field"><label>Rol</label><select name="role">{% for k, v in D.ROLES.items() %}<option value="{{ k }}" {{ 'selected' if k == 'viewer' }}>{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Parola</label><input name="password" type="password" placeholder="Boş bırakılırsa geçici parola üretilir" autocomplete="new-password"></div>
+        <button class="btn primary">Ekle</button>
+      </form>
+    </div>
+    <div class="card"><h2>Trello'dan içe aktar</h2>
+      <p class="small">Trello panosunda <b>Menü → Yazdır, dışa aktar ve paylaş → JSON olarak dışa aktar</b> ile indirdiğiniz dosyayı yükleyin. Kartlar proje, listeler aşama olur.</p>
+      <form method="post" action="/yonetim/trello/onizle" enctype="multipart/form-data"><input type="file" name="file" accept=".json" required><button class="btn sm" style="margin-top:8px">Önizle</button></form>
+    </div>
+    <div class="card"><h2>AI bağlantısı</h2>
+      <p class="small">Durum: <b>{{ ai_label() }}</b></p>
+      <p class="small muted">Uç nokta <code>.env</code> dosyasındaki <code>AI_PROVIDER</code>, <code>AI_BASE_URL</code>, <code>AI_API_KEY</code>, <code>AI_MODEL</code> ile ayarlanır.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

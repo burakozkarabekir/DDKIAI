@@ -1,0 +1,9 @@
+{% extends "base.html" if user else "bare.html" %}
+{% block title %}Hata {{ code }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:560px">
+  <h1>{{ 'Erişim yok' if code == 403 else 'Bulunamadı' if code == 404 else 'Bir sorun oluştu' }}</h1>
+  <p class="muted">{{ message }}</p>
+  <a class="btn" href="/">Ana sayfaya dön</a>
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Süreç & Kurallar{% endblock %}
+{% block crumbs %}AI Impact yönetişim modeli · v1{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>AI Impact Süreci</h1>
+<p>Bu sayfa takibin kurallarıdır: bir proje hangi aşamadan nasıl geçer, kim neyi ne zaman yapar, ne zaman eskale edilir. Sistem bu kuralları otomatik kontrol eder.</p></div></div>
+
+<div class="grid g4" style="margin-bottom:16px">
+  {% for t, d in [('Tek gerçek kaynak','Trello, e-posta ve sunumlar yerine her projenin durumu, dokümanı ve kararı burada.'),
+                  ('Ölçülmeyen etki, etki değildir','Canlıya çıkan her projenin baseline\'ı ve ölçüm sahibi olmalı.'),
+                  ('Kapıdan geçmeden ilerleme yok','Her aşama geçişinde kriterler kontrol edilir; eksikle geçiş kayda geçer.'),
+                  ('AI önerir, insan karar verir','AI raporları okur ve risk puanlar; portföye işleme kararı DDE ekibindedir.')] %}
+  <div class="card"><h3>{{ t }}</h3><p class="small muted" style="margin:0">{{ d }}</p></div>
+  {% endfor %}
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>1 · Proje yaşam döngüsü ve aşama kapıları</h2>
+  {% set owners = {'fikir':'İş birimi + DDE','analiz':'DDE + Sponsor','onay':'AI Yönlendirme Komitesi','gelistirme':'Doğuş Teknoloji','pilot':'DT + İş birimi','canli':'İş birimi + DDE','olcekleme':'DDE + Komite'} %}
+  {% set outputs = {'fikir':'Talep kaydı, kısa problem tanımı','analiz':'Business case, hedef KPI, tahmini değer','onay':'Komite kararı, DT ekibi, takvim, veri sınıfı','gelistirme':'Gereksinim/teknik tasarım, haftalık rapor','pilot':'Güvenlik değerlendirmesi, baseline, pilot sonuç raporu','canli':'Aylık KPI ölçümü, kullanım metrikleri','olcekleme':'Doğrulanmış etki, yaygınlaştırma planı'} %}
+  {% set gates = GATES %}
+  {% for k, l, desc in D.STAGES %}
+  <div class="phase">
+    <div class="n">{{ loop.index }}</div>
+    <div>
+      <div class="row"><h3 style="margin:0">{{ l }}</h3><span class="badge">{{ owners[k] }}</span></div>
+      <p class="small" style="margin:4px 0 6px">{{ desc }} <span class="muted">Çıktı: {{ outputs[k] }}</span></p>
+      {% if gates.get(k) %}<div class="small"><b>Bu aşamaya giriş kapısı:</b> {% for c, _ in gates[k] %}<span class="badge" style="margin:2px">{{ c }}</span>{% endfor %}</div>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  <p class="small muted" style="margin-top:10px">Akış dışı durumlar: <b>Beklemede</b> (karar/kaynak bekleniyor, en fazla 6 hafta, sonra komite kararı) ve <b>İptal</b> (öğrenimler yorum olarak kaydedilir).</p>
+</div>
+
+<div class="grid g2" style="margin-bottom:16px">
+  <div class="card">
+    <h2>2 · Haftalık ritim</h2>
+    <div class="cadence" style="grid-template-columns:1fr">
+      <div class="day"><b>Pazartesi 12:00'ye kadar</b>DT haftalık durum raporunu yükler (dosya ya da metin). Raporda olmayan aktif proje "durum gelmedi" olarak işaretlenir.</div>
+      <div class="day"><b>Pazartesi öğleden sonra</b>AI raporu analiz eder. DDE ekibi önerileri inceler, uygun olanları portföye işler, gerekirse aksiyon açar.</div>
+      <div class="day"><b>Salı</b>DDE – DT haftalık senkron (30 dk): yalnızca sarı/kırmızı projeler ve açık aksiyonlar konuşulur.</div>
+      <div class="day"><b>Çarşamba</b>Genel Müdür Yönetici Özeti'ni inceler, yorum/talimatlarını ilgili proje kartına yazar.</div>
+      <div class="day"><b>Cuma</b>Aksiyon sahipleri kapanışları sisteme işler; geciken aksiyonlar sonraki haftanın gündemine düşer.</div>
+    </div>
+  </div>
+  <div class="stack">
+    <div class="card">
+      <h2>3 · Aylık ve çeyreklik</h2>
+      <ul class="list-plain small">
+        <li><b>Aylık · AI Yönlendirme Komitesi</b> (GM, DDE, DT, Bilgi Güvenliği): aşama kapısı kararları, yeni talepler, beklemedeki projeler.</li>
+        <li><b>Aylık · KPI ölçümü:</b> canlı projelerin KPI sahipleri gerçekleşen değerleri girer.</li>
+        <li><b>Aylık · AI Security:</b> AI Studio, Shadow AI, DLP ve eğitim metrikleri yüklenir.</li>
+        <li><b>Çeyreklik · Etki doğrulama:</b> Finans ile gerçekleşen değer doğrulanır → "Doğrulandı".</li>
+        <li><b>Çeyreklik · Boşluk analizi:</b> AI danışman kurumsal yapıya göre eksik alanları raporlar, komite odak alanlarını seçer.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>4 · Sağlık tanımları</h2>
+      <div class="check ok"><span class="health yesil" style="min-width:90px">Yolunda</span><span class="small">Takvim ve kapsam planda; engel yok ya da sahibi belli ve bu hafta çözülecek.</span></div>
+      <div class="check"><span class="health sari" style="min-width:90px">Dikkat</span><span class="small">Hedef tarih ≤ 2 hafta kayma riski, karar/veri/erişim bekleniyor ya da aynı engel 2. kez raporlandı.</span></div>
+      <div class="check"><span class="health kirmizi" style="min-width:90px">Riskli</span><span class="small">Hedef tarih kaçtı veya &gt; 2 hafta kayacak, geliştirme durdu, ekip/kaynak kaybı, güvenlik onayı yok.</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>5 · Roller ve sorumluluklar (RACI)</h2>
+  <p class="small muted">R: Yapan · A: Hesap veren · C: Danışılan · I: Bilgilendirilen</p>
+  <div class="table-wrap" style="border:0"><table class="raci">
+    <thead><tr><th>Faaliyet</th><th>Genel Müdür / Komite</th><th>Dijital Dönüşüm</th><th>İş Birimi Sponsoru</th><th>Doğuş Teknoloji</th><th>Bilgi Güvenliği</th></tr></thead>
+    <tbody>
+    {% for row in [('Talep / fikir girişi','I','A','R','C','I'),('Business case ve KPI tanımı','I','A','R','C','—'),('Onay & önceliklendirme','A','R','C','C','C'),
+                   ('Geliştirme ve haftalık rapor','I','A','C','R','—'),('AI güvenlik değerlendirmesi','I','C','I','R','A'),('Pilot ve baseline ölçümü','I','A','R','R','C'),
+                   ('Canlıya geçiş kararı','A','R','C','C','C'),('KPI ölçümü ve etki raporu','I','A','R','C','—'),('Haftalık AI analizinin onayı','I','A/R','—','I','—'),
+                   ('AI Security metrikleri','I','C','—','C','A/R')] %}
+    <tr>{% for c in row %}<td class="{{ '' if loop.first else 'small' }}">{% if not loop.first and c != '—' %}<b>{{ c }}</b>{% else %}{{ c }}{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <h2>6 · Eskalasyon kuralları</h2>
+    <ul class="small" style="padding-left:18px;margin:0;line-height:1.8">
+      <li>2 hafta üst üste <b>Riskli</b> → Genel Müdür gündemine, DT yöneticisiyle karar toplantısı.</li>
+      <li>AI risk skoru <b>≥ 60</b> → DDE 48 saat içinde engel sahibiyle görüşür ve aksiyon açar.</li>
+      <li>Terminini <b>7 gün</b> geçen aksiyon → aylık komitede sahibiyle birlikte görüşülür.</li>
+      <li>Aktif proje <b>14 gün</b> raporda geçmezse → DT'den yazılı durum istenir.</li>
+      <li><b>Canlıda olup 60 gün</b> içinde baseline'ı olmayan proje → ölçüm planı zorunlu aksiyon olarak açılır.</li>
+      <li>Kişisel veri (KVKK) içeren projede güvenlik onayı yoksa → pilota geçilmez.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>7 · Erişim modeli</h2>
+    <table style="min-width:0">
+      <tbody>
+      <tr><td><b>{{ D.ROLES['executive'] }}</b></td><td class="small">Her şeyi görür, yorum yapar, AI danışmanı kullanır.</td></tr>
+      <tr><td><b>{{ D.ROLES['dde'] }}</b></td><td class="small">Proje, aşama, KPI, aksiyon ve metrikleri yönetir; AI önerilerini onaylar.</td></tr>
+      <tr><td><b>{{ D.ROLES['dt'] }}</b></td><td class="small">Kendisine açık projeleri görür, rapor/doküman yükler, durum ve KPI günceller, yorum yazar. AI danışman, risk skorları ve AI Security'ye erişmez.</td></tr>
+      <tr><td><b>{{ D.ROLES['viewer'] }}</b></td><td class="small">İş birimi yöneticileri: görüntüler ve yorum yapar.</td></tr>
+      <tr><td><b>{{ D.ROLES['admin'] }}</b></td><td class="small">Kullanıcılar, Trello aktarımı, silme işlemleri.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

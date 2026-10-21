@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giriş · {{ APP_NAME }}</title><link rel="stylesheet" href="/static/css/app.css"></head>
+<body>
+<div class="login-wrap">
+  <div class="login-art">
+    <div class="brand"><div class="brand-mark">AI</div><div><b>{{ APP_NAME }}</b><span>{{ ORG_NAME }}</span></div></div>
+    <div>
+      <h1>AI Impact projelerini tek ekranda takip edin.</h1>
+      <ul>
+        <li>Proje portföyü, aşama kapıları ve etki ölçümü</li>
+        <li>DT haftalık raporlarından AI destekli risk analizi</li>
+        <li>Kurumsal yapıya göre boşluk ve odak önerileri</li>
+        <li>AI Security: AI Studio, Shadow AI ve veri koruma metrikleri</li>
+      </ul>
+    </div>
+    <div class="small" style="opacity:.6">Şirket içi kullanım içindir. Tüm veriler ve AI çağrıları kurum ağında kalır.</div>
+  </div>
+  <div class="login-form">
+    <form method="post" action="/giris">
+      <h1>Giriş yap</h1>
+      <p class="muted">Kurumsal e-posta adresinizle giriş yapın.</p>
+      {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="field"><label for="email">E-posta</label><input id="email" name="email" type="email" required autofocus autocomplete="username"></div>
+      <div class="field"><label for="password">Parola</label><input id="password" name="password" type="password" required autocomplete="current-password"></div>
+      <button class="btn primary" style="width:100%;justify-content:center">Giriş</button>
+      {% if demo %}
+      <div class="callout small" style="margin-top:18px">
+        <b>Demo hesapları</b> (parola <code>Demo123!</code>):<br>
+        gm@demo.local · Üst yönetim<br>dde@demo.local · Dijital Dönüşüm<br>dt@demo.local · Doğuş Teknoloji<br>
+        Admin: admin@demo.local / <code>Admin123!</code>
+      </div>{% endif %}
+    </form>
+  </div>
+</div>
+</body></html>

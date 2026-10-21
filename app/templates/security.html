@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import health %}
+{% block title %}AI Security{% endblock %}
+{% block crumbs %}AI kullanım ve güvenlik metrikleri · son dönem {{ (periods[-1]|period) if periods else '—' }}{% endblock %}
+{% block topactions %}<a class="btn" href="/guvenlik/sablon.csv">CSV şablonu</a>{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>AI Security</h1>
+<p>Kurumsal AI kullanımı (AI Studio), onaysız AI kullanımı (Shadow AI), veri koruma ve farkındalık. Hedef: güvenli kanalın büyümesi, gölge kullanımın küçülmesi.</p></div></div>
+
+<h2>Girişimler</h2>
+<div class="grid g3" style="margin-bottom:22px">
+  {% for i in initiatives %}
+  <a class="card pcard {{ i.health }}" href="/guvenlik/{{ i.slug }}" style="margin:0">
+    <div class="row"><span class="badge">{{ 'Platform' if i.category == 'platform' else 'Güvenlik' }}</span><span class="spacer"></span>{{ health(i.health) }}</div>
+    <div class="t" style="font-size:15px;margin-top:8px">{{ i.name }}</div>
+    <div class="small muted">{{ i.status or '' }}</div>
+    <div class="meta" style="margin-top:8px"><span>👤 {{ i.owner or '—' }}</span><span>💬 {{ i.n }}</span></div>
+  </a>
+  {% endfor %}
+</div>
+
+{% if user.role in D.CAN_EDIT %}
+<details class="card inline" style="margin:-8px 0 22px"><summary><b>+ Yeni girişim ekle</b> <span class="small muted">(ör. Copilot yaygınlaştırma, Model risk yönetimi)</span></summary>
+  <form method="post" action="/guvenlik/yeni" class="form-grid" style="margin-top:12px">
+    <div class="field"><label>Ad</label><input name="name" required></div>
+    <div class="field"><label>Sorumlu</label><input name="owner"></div>
+    <div class="field"><label>Kategori</label><select name="category"><option value="guvenlik">Güvenlik</option><option value="platform">Platform</option></select></div>
+    <div class="field span3"><label>Açıklama</label><input name="description"></div>
+    <div class="field"><button class="btn primary sm">Ekle</button></div>
+  </form>
+</details>{% endif %}
+
+{% for group, items in groups.items() %}
+<h2 style="margin-top:8px">{{ group }}</h2>
+<div class="grid g3" style="margin-bottom:22px">
+  {% for m in items %}
+  <div class="card metric-card">
+    <div class="small muted">{{ m.label }}</div>
+    <div class="row" style="align-items:baseline"><span class="value">{{ m.last|num }}{{ '%' if m.unit == '%' }}</span>{% if m.unit != '%' %}<span class="small muted">{{ m.unit }}</span>{% endif %}<span class="spacer"></span>
+      {% if m.delta is not none %}<span class="delta {{ 'flat' if m.good is none else 'good' if m.good else 'bad' }}">{{ '▲' if m.delta > 0 else '▼' if m.delta < 0 else '■' }} %{{ m.delta|abs|round(1) }} <span class="muted" style="font-weight:400">geçen aya göre</span></span>{% endif %}</div>
+    <div style="margin-top:6px">{{ m.chart }}</div>
+    <div class="small muted">{{ 'Artması iyi' if m.direction == 'up' else 'Azalması iyi' }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<div class="grid g2">
+  <div class="card">
+    <h2>Projelerde güvenlik kapısı</h2>
+    <p class="small muted">Geliştirme ve sonrası aşamalardaki projeler. Güvenlik değerlendirmesi olmadan pilota geçilmemeli.</p>
+    <div class="table-wrap" style="border:0"><table style="min-width:0">
+      <thead><tr><th>Proje</th><th>Aşama</th><th>Değerlendirme</th><th>Veri sınıfı</th></tr></thead>
+      <tbody>{% for p in project_sec %}<tr>
+        <td><span class="code">{{ p.code }}</span> <a href="/projeler/{{ p.id }}">{{ p.name }}</a></td><td class="small">{{ D.STAGE_LABELS[p.stage] }}</td>
+        <td><span class="health {{ 'yesil' if p.security_review == 'onaylandi' else 'sari' if p.security_review in ('devam','sartli') else 'kirmizi' }}">{{ D.SECURITY_REVIEW_LABELS[p.security_review] }}</span></td>
+        <td class="small">{{ p.data_class or '—' }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  {% if user.role in D.CAN_EDIT %}
+  <div class="card">
+    <h2>Aylık metrik girişi</h2>
+    <form method="post" action="/guvenlik/metrik">
+      <div class="field"><label>Dönem</label><input type="month" name="period" value="{{ today()[:7] }}" required></div>
+      <div class="form-grid">{% for key, m in metrics.items() %}<div class="field"><label>{{ m.label }} ({{ m.unit }})</label><input name="{{ key }}" inputmode="decimal"></div>{% endfor %}</div>
+      <button class="btn primary">Kaydet</button>
+    </form>
+    <hr>
+    <h3>CSV ile toplu yükleme</h3>
+    <p class="small muted">AI Studio, proxy/CASB veya DLP raporlarından üretilen CSV: <code>period,metric,value,note</code></p>
+    <form method="post" action="/guvenlik/csv" enctype="multipart/form-data" class="row"><input type="file" name="file" accept=".csv" required style="flex:1"><button class="btn">İçe aktar</button></form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

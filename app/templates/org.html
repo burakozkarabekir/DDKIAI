@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Kurumsal Yapı{% endblock %}
+{% block crumbs %}AI danışmanın kullandığı kurumsal bağlam{% endblock %}
+{% block content %}
+{% set editor = user.role in D.CAN_EDIT %}
+{% macro tree(parent) %}
+<ul class="list-plain" style="{{ 'padding-left:18px;border-left:2px solid var(--border);margin-left:6px' if parent }}">
+{% for u in children.get(parent, []) if u.kind != 'doküman' %}
+  <li>
+    <details class="inline"><summary class="row"><b>{{ u.name }}</b><span class="badge">{{ u.kind }}</span>{% if u.value_chain %}<span class="small muted">{{ u.value_chain }}</span>{% endif %}<span class="spacer"></span>{% if u.headcount %}<span class="small muted">{{ u.headcount }} kişi</span>{% endif %}</summary>
+      <div style="padding:8px 0">
+        {% if u.description %}<p class="small">{{ u.description }}</p>{% endif %}
+        {% if u.pain_points %}<p class="small"><b>Ağrı noktaları:</b> {{ u.pain_points }}</p>{% endif %}
+        {% if editor %}
+        <form method="post" action="/kurumsal-yapi" class="form-grid small">
+          <input type="hidden" name="unit_id" value="{{ u.id }}">
+          <div class="field"><label>Ad</label><input name="name" value="{{ u.name }}" required></div>
+          <div class="field"><label>Üst birim</label><select name="parent_id"><option value="">—</option>{% for o in units if o.id != u.id and o.kind != 'doküman' %}<option value="{{ o.id }}" {{ 'selected' if o.id == u.parent_id }}>{{ o.name }}</option>{% endfor %}</select></div>
+          <div class="field"><label>Tür</label><select name="kind">{% for k in ['şirket','fonksiyon','birim','iştirak','marka'] %}<option {{ 'selected' if u.kind == k }}>{{ k }}</option>{% endfor %}</select></div>
+          <div class="field"><label>Değer zinciri</label><select name="value_chain"><option value="">—</option>{% for a in D.VALUE_CHAIN %}<option {{ 'selected' if u.value_chain == a }}>{{ a }}</option>{% endfor %}</select></div>
+          <div class="field"><label>Kişi sayısı</label><input name="headcount" value="{{ u.headcount or '' }}"></div>
+          <div class="field"></div>
+          <div class="field span3"><label>Açıklama</label><input name="description" value="{{ u.description or '' }}"></div>
+          <div class="field span3"><label>Ağrı noktaları / fırsatlar</label><input name="pain_points" value="{{ u.pain_points or '' }}"></div>
+          <div class="row"><button class="btn sm">Kaydet</button></div>
+        </form>
+        <form method="post" action="/kurumsal-yapi/{{ u.id }}/sil" data-confirm="{{ u.name }} ve alt birimleri silinsin mi?"><button class="btn ghost sm danger">Sil</button></form>
+        {% endif %}
+      </div>
+    </details>
+    {% if children.get(u.id) %}{{ tree(u.id) }}{% endif %}
+  </li>
+{% endfor %}
+</ul>
+{% endmacro %}
+<div class="page-head"><div><h1>Kurumsal Yapı</h1>
+<p>Fonksiyonlar, birimler, iştirakler ve her birimin ağrı noktaları. AI danışman boşluk analizini bu yapıya göre yapar: "hangi birimin hangi problemi için henüz AI projesi yok?"</p></div></div>
+<div class="grid g-main">
+  <div class="card">{{ tree(none) }}</div>
+  <div class="stack">
+    {% if editor %}
+    <div class="card"><h2>Birim ekle</h2>
+      <form method="post" action="/kurumsal-yapi">
+        <div class="field"><label>Ad</label><input name="name" required></div>
+        <div class="field"><label>Üst birim</label><select name="parent_id"><option value="">—</option>{% for o in units if o.kind != 'doküman' %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Tür</label><select name="kind">{% for k in ['fonksiyon','birim','iştirak','marka','şirket'] %}<option>{{ k }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Değer zinciri</label><select name="value_chain"><option value="">—</option>{% for a in D.VALUE_CHAIN %}<option>{{ a }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Kişi sayısı</label><input name="headcount"></div>
+        <div class="field"><label>Açıklama</label><textarea name="description" rows="2"></textarea></div>
+        <div class="field"><label>Ağrı noktaları</label><textarea name="pain_points" rows="2"></textarea></div>
+        <button class="btn primary">Ekle</button>
+      </form>
+    </div>
+    <div class="card"><h2>Doküman ile bağlam ekle</h2>
+      <p class="small">Organizasyon şeması, strateji sunumu, faaliyet raporu… İçerik AI bağlamına eklenir.</p>
+      <form method="post" action="/kurumsal-yapi/dokuman" enctype="multipart/form-data"><input type="file" name="file" required><button class="btn sm" style="margin-top:8px">Yükle</button></form>
+      <ul class="list-plain small" style="margin-top:8px">{% for u in units if u.kind == 'doküman' %}<li class="row">{{ u.name[9:] }}<span class="spacer"></span><form method="post" action="/kurumsal-yapi/{{ u.id }}/sil"><button class="btn ghost sm danger">Kaldır</button></form></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,10 @@
+services:
+  ai-impact:
+    build: .
+    container_name: ai-impact
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"   # önüne kurumsal sertifikalı Nginx/IIS reverse proxy konur
+    volumes:
+      - ./data:/data            # veritabanı + yüklenen dokümanlar (yedeklenmeli)

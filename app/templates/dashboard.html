@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import health, stage, risk %}
+{% block title %}Yönetici Özeti{% endblock %}
+{% block crumbs %}{{ today()|date }}{% if latest_report %} · Son DT raporu: <a href="/raporlar/{{ latest_report.id }}">{{ latest_report.week_start|date }} haftası</a>{% endif %}{% endblock %}
+{% block topactions %}
+<a class="btn" href="/disa-aktar/projeler.csv">Excel'e aktar</a>
+<a class="btn" href="/raporlar">Haftalık rapor yükle</a>
+<a class="btn primary" href="/danisman">AI Danışmana sor</a>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>AI Impact · Yönetici Özeti</h1>
+  <p>Portföyün nerede olduğu, nerede takıldığı ve gerçekten ne kadar değer ürettiği.</p></div>
+</div>
+
+{% set risky_n = health_counts['sari'] + health_counts['kirmizi'] %}
+{% set measured_pct = (measured|length / live|length * 100) if live else 0 %}
+{% set realized_pct = (value.realized / value.live_estimated * 100) if value.live_estimated else 0 %}
+<div class="grid g4">
+  <div class="card stat"><div class="label">Aktif proje</div><div class="value">{{ active|length }}</div>
+    <div class="sub">Toplam {{ projects|length }} kayıt · {{ stage_counts[0][2] }} fikir havuzunda</div></div>
+  <div class="card stat"><div class="label">Canlıda / ölçekleniyor</div><div class="value">{{ live|length }}</div>
+    <div class="sub">{{ measured|length }} tanesinde etki ölçülüyor (%{{ measured_pct|round|int }})</div>
+    <div class="meter"><span style="width:{{ measured_pct }}%"></span></div></div>
+  <div class="card stat"><div class="label">Gerçekleşen yıllık etki</div><div class="value">{{ value.realized|money }}</div>
+    <div class="sub">Canlı projelerin hedefi {{ value.live_estimated|money }} · %{{ realized_pct|round|int }} gerçekleşme</div>
+    <div class="meter"><span style="width:{{ [realized_pct, 100]|min }}%"></span></div></div>
+  <div class="card stat"><div class="label">Dikkat gerektiren</div><div class="value">{{ risky_n }}</div>
+    <div class="sub"><span class="health kirmizi">{{ health_counts['kirmizi'] }} riskli</span> &nbsp; <span class="health sari">{{ health_counts['sari'] }} dikkat</span></div></div>
+</div>
+
+<div class="grid g-main" style="margin-top:16px">
+  <div class="card">
+    <div class="card-head"><h2>Portföy hunisi</h2><a class="small" href="/projeler">Panoya git →</a></div>
+    {% set maxc = (stage_counts|map(attribute=2)|max) or 1 %}
+    <div class="funnel">
+      {% for key, label, n in stage_counts %}
+      <a class="funnel-row" href="/projeler?view=liste&stage={{ key }}" style="color:inherit;text-decoration:none" data-tip="{{ label }}: {{ n }} proje">
+        <span>{{ label }}</span><span class="bar"><span style="width:{{ (n / maxc * 100) if n else 0 }}%;background:var(--s1)"></span></span><span class="n">{{ n }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <p class="muted small" style="margin:10px 0 0">{% for key, label, n in side_counts %}{{ label }}: <b>{{ n }}</b>{{ ' · ' if not loop.last }}{% endfor %}</p>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Aktif projelerin sağlığı</h2></div>
+    {% set tot = (active|length) or 1 %}
+    <div class="stackbar">
+      {% for h, color in [('yesil','var(--good)'),('sari','var(--warning)'),('kirmizi','var(--critical)')] %}{% if health_counts[h] %}
+      <span style="width:{{ health_counts[h] / tot * 100 }}%;background:{{ color }}" data-tip="{{ D.HEALTH[h][0] }}: {{ health_counts[h] }}"></span>{% endif %}{% endfor %}
+    </div>
+    <div class="legend">{% for h in ['yesil','sari','kirmizi'] %}<span class="health {{ h }}">{{ D.HEALTH[h][0] }} · {{ health_counts[h] }}</span>{% endfor %}</div>
+    <hr>
+    <h3>Ölçümleme olgunluğu</h3>
+    {% for key, label in D.MEASUREMENT %}
+    {% set n = active|selectattr('measurement_status', 'equalto', key)|list|length %}
+    <div class="funnel-row" style="grid-template-columns:120px 1fr 26px;margin-bottom:5px" data-tip="{{ label }}: {{ n }}">
+      <span class="small">{{ label }}</span><span class="bar" style="height:12px"><span style="width:{{ n / tot * 100 }}%;background:var(--seq-{{ [250,350,450,550,650][loop.index0] }})"></span></span><span class="n small">{{ n }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="grid g-main" style="margin-top:16px">
+  <div class="card">
+    <div class="card-head"><h2>Takılan ya da takılabilecek projeler</h2><span class="muted small">AI risk skoru = DT raporu + geçmiş trend</span></div>
+    {% if risky %}
+    <ul class="list-plain">
+      {% for p in risky %}
+      <li>
+        <div class="row"><span class="code">{{ p.code }}</span><a href="/projeler/{{ p.id }}"><b>{{ p.name }}</b></a>{{ stage(p.stage) }}<span class="spacer"></span>{{ health(p.health) }}<span class="small muted">Risk</span>{{ risk(p.ai_risk_score) }}</div>
+        {% if p.ai_risk_note %}<div class="small muted" style="margin-top:4px">{{ p.ai_risk_note|truncate(230) }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<div class="empty">Riskli proje yok.</div>{% endif %}
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Bu haftanın AI yorumu</h2>{% if latest_insight %}<span class="muted small">{{ latest_insight.created_at|ago }}</span>{% endif %}</div>
+    {% if latest_insight %}<div class="prose">{{ latest_insight.body|md }}</div>
+    {% if latest_report %}<a class="btn sm" href="/raporlar/{{ latest_report.id }}" style="margin-top:8px">Rapor analizini aç</a>{% endif %}
+    {% else %}<div class="empty">Henüz analiz edilmiş rapor yok.</div>{% endif %}
+  </div>
+</div>
+
+<div class="grid g3" style="margin-top:16px">
+  <div class="card">
+    <div class="card-head"><h3>Canlıda ama ölçülmüyor</h3><span class="badge">{{ unmeasured_live|length }}</span></div>
+    <ul class="list-plain">{% for p in unmeasured_live %}
+      <li class="row"><span class="code">{{ p.code }}</span><a href="/projeler/{{ p.id }}?tab=etki">{{ p.name }}</a><span class="spacer"></span><span class="small muted">{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</span></li>
+    {% else %}<li class="muted">Tüm canlı projeler ölçülüyor. 👏</li>{% endfor %}</ul>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>14 gündür durum gelmeyenler</h3><span class="badge">{{ stale|length }}</span></div>
+    <ul class="list-plain">{% for p in stale %}
+      <li class="row"><span class="code">{{ p.code }}</span><a href="/projeler/{{ p.id }}">{{ p.name }}</a><span class="spacer"></span><span class="small muted">{{ p.last_status_at|ago if p.last_status_at else 'hiç' }}</span></li>
+    {% else %}<li class="muted">Tüm aktif projelerin durumu güncel.</li>{% endfor %}</ul>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Açık aksiyonlar</h3><a class="small" href="/aksiyonlar">Tümü →</a></div>
+    <ul class="list-plain">{% for a in actions[:6] %}
+      <li><div class="row"><span class="code">{{ a.code or 'Genel' }}</span><span>{{ a.title }}</span></div>
+      <div class="small {{ 'health kirmizi' if a.due_date|overdue else 'muted' }}" style="margin-top:2px">{{ a.owner or '—' }} · termin {{ a.due_date|date }}{{ ' · gecikti' if a.due_date|overdue }}</div></li>
+    {% else %}<li class="muted">Açık aksiyon yok.</li>{% endfor %}</ul>
+  </div>
+</div>
+
+<div class="grid g-main" style="margin-top:16px">
+  <div class="card">
+    <div class="card-head"><h2>Değer zinciri kapsaması</h2><a class="small" href="/danisman">Boşluk analizi →</a></div>
+    <div class="coverage">
+      {% for c in coverage %}
+      <div class="cov {{ c.level|replace('ş','s')|replace('ı','i') }}"><b>{{ c.area }}</b>
+        {% if c.projects %}{{ c.projects|length }} proje · {{ c.live }} canlı{% else %}<span class="muted">Proje yok</span>{% endif %}</div>
+      {% endfor %}
+    </div>
+    <div class="legend"><span><i style="background:var(--good)"></i>Canlı proje var</span><span><i style="background:var(--warning)"></i>Sadece geliştirme/plan</span><span><i style="background:var(--critical)"></i>Boş alan</span></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Son yorumlar</h2></div>
+    <ul class="list-plain">{% for c in recent_comments %}
+      <li><div class="small"><b>{{ c.uname }}</b> <span class="muted">· {{ c.organization }} · {{ c.created_at|ago }}</span></div>
+        <div class="small"><a href="{{ c.link }}">{{ c.target_name }}</a>: {{ c.body|striptags|truncate(120) }}</div></li>
+    {% else %}<li class="muted">Yorum yok.</li>{% endfor %}</ul>
+  </div>
+</div>
+{% endblock %}

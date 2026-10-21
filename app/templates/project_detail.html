@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import health, stage, risk, comments_block, upload_form %}
+{% block title %}{{ p.code }} {{ p.name }}{% endblock %}
+{% block crumbs %}<a href="/projeler">Projeler</a> / {{ p.code }}{% endblock %}
+{% block topactions %}
+{% if user.role != 'dt' %}<form method="post" action="/projeler/{{ p.id }}/ai-degerlendirme"><button class="btn" data-busy="AI değerlendiriyor…">✦ AI değerlendirmesi iste</button></form>{% endif %}
+{% if user.role in D.CAN_EDIT %}<a class="btn primary" href="/projeler/{{ p.id }}/duzenle">Düzenle</a>{% endif %}
+{% endblock %}
+{% block content %}
+{% set editor = user.role in D.CAN_EDIT %}
+<div class="page-head">
+  <div>
+    <div class="row" style="margin-bottom:6px"><span class="code">{{ p.code }}</span>{{ stage(p.stage) }}{{ health(p.health) }}
+      {% if user.role != 'dt' and p.ai_risk_score is not none %}<span class="small muted">AI risk</span>{{ risk(p.ai_risk_score) }}{% endif %}
+      {% if p.priority %}<span class="badge">Öncelik: {{ p.priority }}</span>{% endif %}
+      {% if not p.visible_to_dt %}<span class="badge" title="Doğuş Teknoloji kullanıcıları bu projeyi görmez">DT'ye kapalı</span>{% endif %}</div>
+    <h1>{{ p.name }}</h1>
+    <p>{{ p.summary or '' }}</p>
+  </div>
+</div>
+
+<div class="stepper">
+  {% set cur = D.STAGE_ORDER.index(p.stage) if p.stage in D.STAGE_ORDER else -1 %}
+  {% for k, l, _ in D.STAGES %}<div class="step {{ 'current' if loop.index0 == cur else 'done' if loop.index0 < cur }}">{{ loop.index }}. {{ l }}</div>{% endfor %}
+</div>
+{% if cur == -1 %}<p class="small muted">Proje şu an akış dışında: <b>{{ D.STAGE_LABELS[p.stage] }}</b></p>{% endif %}
+
+{% set counts = {'dokuman': documents|length, 'yorumlar': comments|length, 'aksiyon': actions|selectattr('status','equalto','acik')|list|length, 'durum': updates|length, 'etki': kpis|length} %}
+<nav class="tabs" style="margin-top:18px">
+  {% for key, label in [('genel','Genel Bakış'),('etki','Etki & Ölçümleme'),('durum','Haftalık Durum'),('dokuman','Dokümanlar'),('aksiyon','Aksiyonlar'),('yorumlar','Yorumlar'),('tarihce','Tarihçe')] %}
+  <a href="?tab={{ key }}" class="{{ 'on' if tab == key }}">{{ label }}{% if counts.get(key) %}<span class="count">{{ counts[key] }}</span>{% endif %}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == 'genel' %}
+<div class="grid g-main">
+  <div class="stack">
+    <div class="card">
+      <div class="grid g2">
+        <div><h3>Problem</h3><div class="prose">{{ (p.problem or '_Tanımlanmadı_')|md }}</div></div>
+        <div><h3>Çözüm</h3><div class="prose">{{ (p.solution or '_Tanımlanmadı_')|md }}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Künye</h3>
+      <table>
+        <tr><td class="muted">Değer zinciri</td><td>{{ p.value_chain or '—' }}</td><td class="muted">İş birimi</td><td>{{ p.business_unit or '—' }}</td></tr>
+        <tr><td class="muted">Markalar</td><td>{{ p.brands or '—' }}</td><td class="muted">AI tipi</td><td>{{ p.ai_type or '—' }}</td></tr>
+        <tr><td class="muted">Sponsor</td><td>{{ p.sponsor or '—' }}</td><td class="muted">DO sorumlusu</td><td>{{ p.owner or '—' }}</td></tr>
+        <tr><td class="muted">DT sorumlusu</td><td>{{ p.dt_lead or '—' }}</td><td class="muted">Başlangıç</td><td>{{ p.start_date|date }}</td></tr>
+        <tr><td class="muted">Hedef canlı</td><td>{% if p.target_date|overdue and p.stage not in ('canli','olcekleme') %}<span class="health kirmizi">{{ p.target_date|date }} · gecikti</span>{% else %}{{ p.target_date|date }}{% endif %}</td><td class="muted">Canlıya geçiş</td><td>{{ p.golive_date|date }}</td></tr>
+        <tr><td class="muted">Tahmini değer</td><td>{{ p.estimated_value|money }} / yıl</td><td class="muted">Gerçekleşen</td><td>{{ p.realized_value|money }} / yıl</td></tr>
+        <tr><td class="muted">FTE kazanımı</td><td>{{ p.fte_saving|num }}</td><td class="muted">Ölçümleme</td><td>{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</td></tr>
+        <tr><td class="muted">Güvenlik değ.</td><td>{{ D.SECURITY_REVIEW_LABELS[p.security_review] }}</td><td class="muted">Veri sınıfı</td><td>{{ p.data_class or '—' }}</td></tr>
+        <tr><td class="muted">Son durum</td><td>{{ p.last_status_at|ago }}</td><td class="muted">Son güncelleme</td><td>{{ p.updated_at|ago }}</td></tr>
+      </table>
+    </div>
+    {% if user.role != 'dt' and p.ai_risk_note %}
+    <div class="card"><h3>AI danışman notu</h3><div class="prose">{{ p.ai_risk_note|md }}</div></div>
+    {% endif %}
+  </div>
+  <div class="stack">
+    <div class="card">
+      <h3>Aşama kapısı {% if next_stage %}→ {{ D.STAGE_LABELS[next_stage] }}{% endif %}</h3>
+      {% if next_stage %}
+        {% for crit, ok in gates[next_stage] %}<div class="check {{ 'ok' if ok else 'no' }}"><span class="ic">{{ '✓' if ok else '!' }}</span>{{ crit }}</div>{% endfor %}
+      {% else %}<p class="muted small">Son aşamada ya da akış dışında.</p>{% endif %}
+      {% if editor %}
+      <hr>
+      <form method="post" action="/projeler/{{ p.id }}/asama">
+        <div class="field"><label>Aşamayı değiştir</label>
+          <select name="to_stage">{% for k, l, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if k == (next_stage or p.stage) }}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Karar notu</label><input name="note" placeholder="ör. Komite 14.10 kararı"></div>
+        <button class="btn primary sm">Aşamayı güncelle</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if user.role in D.CAN_UPLOAD %}
+    <div class="card">
+      <h3>Hızlı durum güncellemesi</h3>
+      <form method="post" action="/projeler/{{ p.id }}/durum">
+        <div class="row" style="margin-bottom:10px">{% for k, v in D.HEALTH.items() %}<label class="row" style="margin:0;font-weight:500"><input type="radio" name="health" value="{{ k }}" {{ 'checked' if p.health == k }}> <span class="health {{ k }}">{{ v[0] }}</span></label>{% endfor %}</div>
+        <textarea name="note" placeholder="Bu hafta ne oldu? Engel var mı?"></textarea>
+        <button class="btn sm" style="margin-top:8px">Kaydet</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% elif tab == 'etki' %}
+<div class="card">
+  <div class="card-head"><h2>KPI'lar</h2><span class="muted small">Ölçümleme: <b>{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</b> · Baseline olmadan etki iddia edilmez.</span></div>
+  <div class="table-wrap" style="border:0">
+  <table>
+    <thead><tr><th>KPI</th><th>Yön</th><th class="num">Baseline</th><th class="num">Hedef</th><th class="num">Gerçekleşen</th><th>İlerleme</th><th>Ölçüm yöntemi</th><th></th></tr></thead>
+    <tbody>
+    {% for k in kpis %}
+      {% set prog = none %}
+      {% if k.baseline is not none and k.target is not none and k.actual is not none and k.target != k.baseline %}{% set prog = ((k.actual - k.baseline) / (k.target - k.baseline) * 100) %}{% endif %}
+      <tr>
+        <td><b>{{ k.name }}</b><div class="small muted">{{ k.unit or '' }}{% if k.measured_at %} · ölçüm {{ k.measured_at|date }}{% endif %}</div></td>
+        <td class="small">{{ '↑ artmalı' if k.direction == 'up' else '↓ azalmalı' }}</td>
+        {% if user.role in D.CAN_UPLOAD %}
+        <td><input form="kpi-{{ k.id }}" name="baseline" value="{{ k.baseline if k.baseline is not none else '' }}" style="width:96px" inputmode="decimal"></td>
+        <td><input form="kpi-{{ k.id }}" name="target" value="{{ k.target if k.target is not none else '' }}" style="width:96px" inputmode="decimal"></td>
+        <td><input form="kpi-{{ k.id }}" name="actual" value="{{ k.actual if k.actual is not none else '' }}" style="width:96px" inputmode="decimal"></td>
+        {% else %}
+        <td class="num">{{ k.baseline|num }}</td><td class="num">{{ k.target|num }}</td><td class="num">{{ k.actual|num }}</td>
+        {% endif %}
+        <td style="min-width:120px">{% if prog is not none %}<div class="meter" style="margin:6px 0 2px"><span style="width:{{ [[prog,0]|max,100]|min }}%"></span></div><span class="small">%{{ prog|round|int }}</span>{% else %}<span class="small muted">Veri eksik</span>{% endif %}</td>
+        <td>{% if user.role in D.CAN_UPLOAD %}<input form="kpi-{{ k.id }}" name="method" value="{{ k.method or '' }}">{% else %}<span class="small">{{ k.method or '—' }}</span>{% endif %}</td>
+        <td class="nowrap">{% if user.role in D.CAN_UPLOAD %}<form method="post" action="/kpi/{{ k.id }}" id="kpi-{{ k.id }}" style="display:inline"><button class="btn sm">Kaydet</button></form>{% endif %}
+          {% if editor %}<form method="post" action="/kpi/{{ k.id }}/sil" style="display:inline" data-confirm="KPI silinsin mi?"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="8" class="empty">KPI tanımlanmadı. Analiz aşamasından çıkmak için en az bir hedef KPI gerekir.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if user.role in D.CAN_UPLOAD %}
+  <hr>
+  <h3>KPI ekle</h3>
+  <form method="post" action="/projeler/{{ p.id }}/kpi" class="form-grid">
+    <div class="field span2"><label>KPI adı</label><input name="name" required placeholder="ör. Garanti ret oranı"></div>
+    <div class="field"><label>Birim</label><input name="unit" placeholder="%, dk, TL/ay…"></div>
+    <div class="field"><label>Yön</label><select name="direction"><option value="up">Artması iyi</option><option value="down">Azalması iyi</option></select></div>
+    <div class="field"><label>Baseline</label><input name="baseline" inputmode="decimal"></div>
+    <div class="field"><label>Hedef</label><input name="target" inputmode="decimal"></div>
+    <div class="field"><label>Gerçekleşen</label><input name="actual" inputmode="decimal"></div>
+    <div class="field span2"><label>Ölçüm yöntemi / veri kaynağı</label><input name="method" placeholder="ör. DMS raporu, aylık"></div>
+    <div class="field"><button class="btn primary">KPI ekle</button></div>
+  </form>
+  {% endif %}
+</div>
+
+{% elif tab == 'durum' %}
+<div class="stack">
+{% for u in updates %}
+  <div class="card">
+    <div class="card-head"><h3><a href="/raporlar/{{ u.rid }}">{{ u.week_start|date }} haftası</a></h3><div class="row">{% if u.suggested_health %}{{ health(u.suggested_health) }}{% endif %}{% if user.role != 'dt' %}<span class="small muted">Risk</span>{{ risk(u.risk_score) }}{% endif %}</div></div>
+    <p>{{ u.status_text }}</p>
+    <div class="grid g3 small">
+      <div><b>Engeller</b><ul>{% for b in u.blockers|fromjson %}<li>{{ b }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul></div>
+      <div><b>Sonraki adımlar</b><ul>{% for b in u.next_steps|fromjson %}<li>{{ b }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul></div>
+      {% if user.role != 'dt' %}<div><b>AI yorumu</b><p>{{ u.ai_comment or '—' }}</p></div>{% endif %}
+    </div>
+  </div>
+{% else %}<div class="card empty">Bu proje henüz hiçbir haftalık raporda geçmedi.</div>{% endfor %}
+</div>
+
+{% elif tab == 'dokuman' %}
+<div class="card">
+  {% if user.role in D.CAN_UPLOAD %}{{ upload_form(project_id=p.id) }}<hr>{% endif %}
+  <div class="table-wrap" style="border:0"><table>
+    <thead><tr><th>Doküman</th><th>Kategori</th><th>Yükleyen</th><th>Tarih</th><th class="num">Boyut</th><th></th></tr></thead>
+    <tbody>{% for d in documents %}
+    <tr><td><a href="/dokuman/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ d.filename }}</div></td><td class="small">{{ d.category }}</td>
+      <td class="small">{{ d.uname }}</td><td class="small">{{ d.uploaded_at|date }}</td><td class="num small">{{ ((d.size or 0) / 1024)|round|int }} KB</td>
+      <td>{% if editor %}<form method="post" action="/dokuman/{{ d.id }}/sil" data-confirm="Doküman silinsin mi?"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="6" class="empty">Doküman yok.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="small muted" style="margin-top:10px">PDF, Word, Excel, PowerPoint ve metin dosyalarının içeriği AI değerlendirmesinde kullanılır.</p>
+</div>
+
+{% elif tab == 'aksiyon' %}
+<div class="card">
+  {% if editor %}
+  <form method="post" action="/projeler/{{ p.id }}/aksiyon" class="row" style="align-items:flex-end;margin-bottom:12px">
+    <div style="flex:3;min-width:220px"><label>Aksiyon</label><input name="title" required placeholder="Ne yapılacak?"></div>
+    <div style="flex:1;min-width:140px"><label>Sorumlu</label><input name="owner"></div>
+    <div style="flex:1;min-width:140px"><label>Termin</label><input type="date" name="due_date"></div>
+    <button class="btn primary">Ekle</button>
+  </form>{% endif %}
+  <ul class="list-plain">{% for a in actions %}
+    <li class="row"><form method="post" action="/aksiyon/{{ a.id }}/durum">{% if user.role in D.CAN_UPLOAD %}<button class="btn sm">{{ '✓ Kapat' if a.status == 'acik' else '↺ Aç' }}</button>{% endif %}</form>
+      <span style="{{ 'text-decoration:line-through;color:var(--muted)' if a.status == 'kapali' }}">{{ a.title }}</span><span class="spacer"></span>
+      <span class="small muted">{{ a.owner or '—' }}</span><span class="small {{ 'health kirmizi' if a.status == 'acik' and a.due_date|overdue else 'muted' }}">{{ a.due_date|date }}</span></li>
+  {% else %}<li class="empty">Aksiyon yok.</li>{% endfor %}</ul>
+</div>
+
+{% elif tab == 'yorumlar' %}
+<div class="card">{{ comments_block(comments, 'project', p.id, user) }}</div>
+
+{% elif tab == 'tarihce' %}
+<div class="card">
+  <ul class="list-plain">{% for h in history %}
+    <li><div class="row"><b>{{ D.STAGE_LABELS.get(h.from_stage, 'Başlangıç') if h.from_stage else 'Kayıt' }} → {{ D.STAGE_LABELS[h.to_stage] }}</b><span class="spacer"></span><span class="small muted">{{ h.uname or '—' }} · {{ h.at|date }}</span></div>
+      {% if h.note %}<div class="small">{{ h.note }}</div>{% endif %}
+      {% if h.missing_criteria %}<div class="small health sari">Eksik kriterlerle geçildi: {{ (h.missing_criteria|fromjson)|join(', ') }}</div>{% endif %}</li>
+  {% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if user.role == 'admin' %}
+<form method="post" action="/projeler/{{ p.id }}/sil" data-confirm="{{ p.code }} kalıcı olarak silinsin mi? Bu işlem geri alınamaz." style="margin-top:24px">
+  <button class="btn ghost sm danger">Projeyi sil</button></form>
+{% endif %}
+{% endblock %}
