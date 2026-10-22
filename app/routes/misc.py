@@ -235,7 +235,7 @@ def settings_page(request: Request, user=Depends(require_editor)):
     return settings(request, user)
 
 
-def settings(request: Request, user: dict, preview: dict | None = None, test: dict | None = None):
+def settings(request: Request, user: dict, preview: dict | None = None, test: dict | None = None, probe: str | None = None):
     deps = db.rows("SELECT d.*, (SELECT COUNT(*) FROM projects p WHERE p.department_id = d.id) AS n FROM departments d ORDER BY sort, name")
     ai_cfg = {"provider": config.AI_PROVIDER, "base_url": config.AI_BASE_URL or "—", "model": config.AI_MODEL or "—",
               "key": ("•" * 8 + config.AI_API_KEY[-4:]) if len(config.AI_API_KEY) > 8 else ("tanımlı" if config.AI_API_KEY else "yok"),
@@ -246,7 +246,7 @@ def settings(request: Request, user: dict, preview: dict | None = None, test: di
     docs = db.row("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS size, SUM(status = 'hata') AS failed, "
                   "SUM(status = 'metin_yok') AS notext FROM documents")
     return render(request, "settings.html", user, usage=storage.usage(), queue=pipeline.queue_state(), soffice=storage.soffice(),
-                  test=test, demo=seed.demo_present(), preview=preview, env_file=config.ENV_FILE,
+                  test=test, probe=probe, demo=seed.demo_present(), preview=preview, env_file=config.ENV_FILE,
                   provider_set=config.AI_PROVIDER_SET,
                   failed_jobs=db.rows("SELECT * FROM jobs WHERE status = 'hata' ORDER BY id DESC LIMIT 10"),
                   mock_docs=db.scalar("SELECT COUNT(*) FROM documents WHERE ai_mode = 'mock' OR (ai_mode IS NULL AND status = 'islendi')"),
@@ -294,6 +294,12 @@ def department_delete(request: Request, dep_id: int, user=Depends(require_editor
     db.execute("DELETE FROM departments WHERE id = ?", (dep_id,))
     flash(request, f"Departman silindi. {n} projenin departmanı boşaltıldı." if n else "Departman silindi.")
     return redirect("/ayarlar#departmanlar")
+
+
+@router.post("/ayarlar/ai-derin-test", response_class=HTMLResponse)
+def ai_deep_test(request: Request, user=Depends(require_editor)):
+    from .. import ai_probe
+    return settings(request, user, probe=ai_probe.run())
 
 
 @router.post("/ayarlar/ai-test", response_class=HTMLResponse)

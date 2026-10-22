@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from . import ai, config, db, domain
+from . import __version__, ai, config, db, domain
 from .auth import can_see_project
 
 APP_DIR = Path(__file__).parent
@@ -100,7 +100,7 @@ def size(n) -> str:
 templates.env.filters.update(md=md, money=money, num=num, date=fdate, ago=ago, period=period, overdue=overdue, size=size,
                              fromjson=lambda s: json.loads(s or "[]"))
 templates.env.globals.update(D=domain, APP_NAME=config.APP_NAME, ORG_NAME=config.ORG_NAME, ai_label=ai.provider_label,
-                             ai_live=ai.is_live, AUTH_ENABLED=config.AUTH_ENABLED, MAX_UPLOAD_MB=config.MAX_UPLOAD_MB,
+                             ai_live=ai.is_live, AUTH_ENABLED=config.AUTH_ENABLED, MAX_UPLOAD_MB=config.MAX_UPLOAD_MB, VERSION=__version__,
                              GATES=domain.gate_checks({}, [], set()), today=lambda: date.today().isoformat())
 
 

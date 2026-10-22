@@ -103,7 +103,12 @@
         <tr><td class="muted">SSL doğrulama</td><td>{{ ai_cfg.tls }}</td></tr>
         <tr><td class="muted">Bağlam / zaman aşımı</td><td>{{ ai_cfg.context|num }} karakter · {{ ai_cfg.timeout|int }} sn</td></tr>
       </table>
-      <form method="post" action="/ayarlar/ai-test#ai" style="margin-top:10px"><button class="btn primary sm" data-busy="Test ediliyor… (en fazla 1 dk)">Bağlantıyı test et</button></form>
+      <div class="row" style="margin-top:10px">
+        <form method="post" action="/ayarlar/ai-test#ai"><button class="btn primary sm" data-busy="Test ediliyor… (en fazla 1 dk)">Bağlantıyı test et</button></form>
+        <form method="post" action="/ayarlar/ai-derin-test#ai"><button class="btn sm" data-busy="Tüm kombinasyonlar deneniyor… (1-3 dk)">Derin tanılama</button></form>
+      </div>
+      {% if probe %}<div style="margin-top:12px"><div class="small muted" style="margin-bottom:4px">Rapor (anahtar maskeli) — kopyalayıp paylaşabilirsiniz:</div>
+        <pre class="probe">{{ probe }}</pre></div>{% endif %}
       {% if test %}
       <div class="diag" style="margin-top:12px">
         <div class="flash {{ 'ok' if test.ok else 'error' }}" style="margin-bottom:8px">{{ 'Bağlantı çalışıyor.' if test.ok else 'Bağlantı kurulamadı — sorunun olduğu adım aşağıda.' }}</div>

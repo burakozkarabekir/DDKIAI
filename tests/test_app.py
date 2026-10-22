@@ -377,3 +377,50 @@ def test_azure_url_variants(monkeypatch):
             monkeypatch.setenv(k, "mock" if k == "AI_PROVIDER" else "")
         importlib.reload(config)
         srv.shutdown()
+
+
+def test_deep_probe_finds_right_deployment(client):
+    """Derin tanılama: yanlış model adıyla 404 alınırken deployment listesinden doğrusunu bulur."""
+    from app import ai_probe
+
+    class H(BaseHTTPRequestHandler):
+        def _send(self, code, body):
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def do_GET(self):
+            if self.path.startswith("/openai/deployments?"):
+                return self._send(200, {"data": [{"id": "gpt4o-prod", "model": "gpt-4o", "status": "succeeded"}]})
+            self._send(404, {"error": {"code": "404", "message": "Resource not found"}})
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            if self.headers.get("api-key") != "anahtar":
+                return self._send(401, {"error": {"code": "401", "message": "Access denied"}})
+            if "/deployments/gpt4o-prod/" in self.path:
+                return self._send(200, {"choices": [{"message": {"content": "hazir"}}]})
+            if "/deployments/" in self.path:
+                return self._send(404, {"error": {"code": "DeploymentNotFound", "message": "The API deployment for this resource does not exist."}})
+            self._send(404, {"error": {"code": "404", "message": "Resource not found"}})
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    old = (config.AI_API_KEY, config.AI_MODEL)
+    config.AI_API_KEY, config.AI_MODEL = "anahtar", "gpt-4o"  # kullanıcı model adını yazmış
+    try:
+        p = ai_probe.Probe()
+        p.azure(f"http://127.0.0.1:{srv.server_port}")
+        report = "\n".join(p.lines)
+        assert "deployment: gpt4o-prod" in report and "'gpt-4o' adında bir deployment yok" in report
+        assert p.working and p.working[0]["AI_MODEL"] == "gpt4o-prod"
+        assert "anahtar" not in report.replace("anahtar:", "")  # anahtar açık yazılmaz
+        assert "ÇALIŞAN AYAR" in p._finish()
+        assert client.post("/ayarlar/ai-derin-test").status_code == 200
+    finally:
+        config.AI_API_KEY, config.AI_MODEL = old
+        srv.shutdown()

@@ -34,6 +34,7 @@
       {% if AUTH_ENABLED %}<div class="small" style="opacity:.7">{{ D.ROLES[user.role] }} · {{ user.organization }}</div>{% endif %}
       <div class="ai-pill {{ 'live' if ai_live() }}" title="AI bağlantısı"><i></i>{{ ai_label() }}</div>
       <div style="margin-top:10px"><a href="#" data-theme-toggle>Tema</a>{% if AUTH_ENABLED %} · <a href="/cikis">Çıkış</a>{% endif %}{% if user.role == 'admin' %} · <a href="/yonetim">Yönetim</a>{% endif %}</div>
+      <div class="small" style="opacity:.5;margin-top:6px">Sürüm {{ VERSION }}</div>
     </div>
   </nav>
   <main class="main">
