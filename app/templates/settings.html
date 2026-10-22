@@ -92,15 +92,27 @@
       <h2>AI bağlantısı</h2>
       <p class="small">Durum: <b>{{ ai_label() }}</b></p>
       <table class="small kv">
+        <tr><td class="muted">Ayar dosyası</td><td>{% if env_file %}<code style="word-break:break-all">{{ env_file }}</code>{% else %}<b class="health kirmizi">.env bulunamadı</b>{% endif %}</td></tr>
         <tr><td class="muted">AI_PROVIDER</td><td><code>{{ ai_cfg.provider }}</code>{% if provider_set != ai_cfg.provider %} <span class="muted">(.env: {{ provider_set }}{{ ', adresten algılandı' if ai_live() }})</span>{% endif %}</td></tr>
-        <tr><td class="muted">AI_BASE_URL</td><td><code>{{ ai_cfg.base_url }}</code></td></tr>
+        <tr><td class="muted">AI_BASE_URL</td><td><code style="word-break:break-all">{{ ai_cfg.base_url }}</code></td></tr>
+        <tr><td class="muted">Çağrılacak adres</td><td><code style="word-break:break-all">{{ ai_cfg.url }}</code></td></tr>
         <tr><td class="muted">AI_MODEL</td><td><code>{{ ai_cfg.model }}</code></td></tr>
         <tr><td class="muted">AI_API_KEY</td><td><code>{{ ai_cfg.key }}</code></td></tr>
         <tr><td class="muted">AI_AUTH_HEADER</td><td><code>{{ ai_cfg.auth_header }}</code></td></tr>
+        <tr><td class="muted">Proxy</td><td><code>{{ ai_cfg.proxy }}</code></td></tr>
+        <tr><td class="muted">SSL doğrulama</td><td>{{ ai_cfg.tls }}</td></tr>
         <tr><td class="muted">Bağlam / zaman aşımı</td><td>{{ ai_cfg.context|num }} karakter · {{ ai_cfg.timeout|int }} sn</td></tr>
       </table>
-      <form method="post" action="/ayarlar/ai-test" style="margin-top:10px"><button class="btn primary sm" data-busy="Test ediliyor…">Bağlantıyı test et</button></form>
-      {% if test %}<div class="flash {{ 'ok' if test.ok else 'error' }}" style="margin:10px 0 0">{{ test.message }}</div>{% endif %}
+      <form method="post" action="/ayarlar/ai-test#ai" style="margin-top:10px"><button class="btn primary sm" data-busy="Test ediliyor… (en fazla 1 dk)">Bağlantıyı test et</button></form>
+      {% if test %}
+      <div class="diag" style="margin-top:12px">
+        <div class="flash {{ 'ok' if test.ok else 'error' }}" style="margin-bottom:8px">{{ 'Bağlantı çalışıyor.' if test.ok else 'Bağlantı kurulamadı — sorunun olduğu adım aşağıda.' }}</div>
+        {% for st in test.steps %}
+        <div class="check {{ 'ok' if st.ok else 'no' }}"><span class="ic">{{ '✓' if st.ok else '!' }}</span>
+          <div><b>{{ st.name }}</b><div class="small" style="word-break:break-word">{{ st.detail }}</div>
+            {% if st.fix %}<div class="small callout" style="margin-top:4px"><b>Ne yapmalı:</b> {{ st.fix }}</div>{% endif %}</div></div>
+        {% endfor %}
+      </div>{% endif %}
       <p class="small muted" style="margin:10px 0 0">Değerler sunucudaki <code>.env</code> dosyasından okunur. Değiştirdikten sonra uygulamayı yeniden başlatın
         (<code>docker compose up -d</code>). Ayrıntı: README › "Şirket içi AI bağlantısı".</p>
     </div>

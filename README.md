@@ -73,9 +73,20 @@ Yalnızca sunucudaki **`.env`** dosyası. Kod değişikliği gerekmez.
    "Demo modu" yerine sağlayıcı ve model adını gösterir.
 5. AI bağlanmadan önce yüklenmiş dokümanlar Ayarlar'da listelenir: **Bu dokümanları yeniden işle** ile gerçek modelden geçirin (onaylı bilgiler korunur).
 
+**Azure OpenAI / AI Foundry kullanıyorsanız** en kolayı: portalda modelin sayfasındaki **Target URI** adresini olduğu gibi
+`AI_BASE_URL`'e yapıştırmak. Uygulama deployment adını ve `api-version`'ı adresten alır. `AI_MODEL` alanına *model adı* değil
+**deployment adı** yazılır (AI Foundry → Deployments → *Name*). `Resource not found (404)` hatası neredeyse her zaman yanlış deployment adı
+ya da yanlış adres demektir.
+
+**Bağlantı çalışmıyorsa** Ayarlar → **Bağlantıyı test et** adım adım sonuç verir: `.env` okundu mu, ayarlar dolu mu, adres çözümleniyor mu,
+porta ulaşılıyor mu, model ne cevap verdi — ve her hatalı adımda ne yapılması gerektiğini yazar. Şirket ağının SSL sertifikası
+Windows sertifika deposundan otomatik tanınır (`truststore`); proxy gerekiyorsa `AI_PROXY`, şirket içi adres için `NO_PROXY` kullanın.
+
 Uygulama standart istekleri gönderir:
 - `openai`: `POST {AI_BASE_URL}/chat/completions`, `Authorization: Bearer <anahtar>`, JSON modu (`response_format`) — desteklenmezse otomatik olarak düz moda düşer.
-- `azure`: `POST {AI_BASE_URL}/openai/deployments/{AI_MODEL}/chat/completions?api-version=…`, `api-key: <anahtar>`.
+- `azure`: `POST {AI_BASE_URL}/openai/deployments/{AI_MODEL}/chat/completions?api-version=…`, `api-key: <anahtar>`
+  (adres `/openai/v1` ile bitiyorsa `POST …/openai/v1/chat/completions`, model gövdede). Yeni modellerin reddettiği
+  `max_tokens` / `temperature` parametreleri otomatik ayıklanır.
 - `anthropic`: `POST {AI_BASE_URL}/v1/messages`, `x-api-key: <anahtar>`.
 
 Sunucunun çıkışında kurumsal proxy varsa `HTTPS_PROXY` / `NO_PROXY` ortam değişkenleri de kullanılır.

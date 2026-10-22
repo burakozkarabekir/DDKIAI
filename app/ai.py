@@ -48,9 +48,27 @@ def provider_label() -> str:
 
 # ---------------------------------------------------------------- düşük seviye çağrı
 
-def _client() -> httpx.Client:
-    verify = config.AI_CA_BUNDLE or config.AI_VERIFY_TLS
-    return httpx.Client(timeout=config.AI_TIMEOUT, verify=verify)
+def _verify():
+    if not config.AI_VERIFY_TLS:
+        return False
+    if config.AI_CA_BUNDLE:
+        return config.AI_CA_BUNDLE
+    if config.AI_USE_SYSTEM_CERTS:
+        try:
+            import ssl
+
+            import truststore
+            return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        except ImportError:
+            pass
+    return True
+
+
+def _client(timeout: float | None = None) -> httpx.Client:
+    kwargs = {"timeout": timeout or config.AI_TIMEOUT, "verify": _verify()}
+    if config.AI_PROXY:
+        kwargs["proxy"] = config.AI_PROXY
+    return httpx.Client(**kwargs)
 
 
 def _auth_headers(default_header: str, bearer: bool) -> dict:
@@ -63,15 +81,16 @@ def _auth_headers(default_header: str, bearer: bool) -> dict:
     return h
 
 
-def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool = False, max_tokens: int | None = None) -> str:
+def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool = False, max_tokens: int | None = None,
+             retries: int = 3, timeout: float | None = None) -> str:
     if not is_live():
         raise AIError("mock")
     max_tokens = max_tokens or config.AI_MAX_TOKENS
     provider = config.AI_PROVIDER
     last_exc = None
-    for attempt in range(3):  # geçici hatalarda (429/5xx/zaman aşımı) yeniden dene
+    for attempt in range(retries):  # geçici hatalarda (429/5xx/zaman aşımı) yeniden dene
         try:
-            with _client() as client:
+            with _client(timeout) as client:
                 if provider == "anthropic":
                     body = {"model": config.AI_MODEL, "max_tokens": max_tokens, "system": system, "messages": messages,
                             "temperature": config.AI_TEMPERATURE}
@@ -85,16 +104,26 @@ def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool 
                         "temperature": config.AI_TEMPERATURE}
                 if json_mode:
                     body["response_format"] = {"type": "json_object"}
-                if provider == "azure":
+                url = request_url()
+                if provider in ("azure", "azure_v1", "azure_inference"):
                     headers = _auth_headers("api-key", bearer=False)
-                    url = f"{config.AI_BASE_URL}/openai/deployments/{config.AI_MODEL}/chat/completions?api-version={config.AI_AZURE_API_VERSION}"
                 else:
                     headers = _auth_headers("Authorization", bearer=True)
+                if provider != "azure":  # klasik Azure'da model adresteki deployment'tır
                     body["model"] = config.AI_MODEL
-                    url = f"{config.AI_BASE_URL}/chat/completions"
                 r = client.post(url, headers=headers, json=body)
-                if r.status_code in (400, 422) and json_mode:  # bazı sunucular response_format desteklemez
-                    body.pop("response_format", None)
+                for _ in range(3):  # sunucunun desteklemediği parametreleri ayıklayıp yeniden dene
+                    if r.status_code not in (400, 422):
+                        break
+                    err = r.text.lower()
+                    if "max_tokens" in err and "max_completion_tokens" not in body:
+                        body["max_completion_tokens"] = body.pop("max_tokens")      # o-serisi / gpt-5
+                    elif "temperature" in err and "temperature" in body:
+                        body.pop("temperature")
+                    elif "response_format" in body:
+                        body.pop("response_format")                                # JSON modu desteklenmiyor
+                    else:
+                        break
                     r = client.post(url, headers=headers, json=body)
                 _raise(r)
                 return r.json()["choices"][0]["message"]["content"] or ""
@@ -104,7 +133,8 @@ def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool 
                 raise
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             last_exc = AIError(f"AI uç noktasına ulaşılamadı: {exc}")
-        time.sleep(2 * (attempt + 1))
+        if attempt < retries - 1:
+            time.sleep(2 * (attempt + 1))
     raise last_exc
 
 
@@ -126,15 +156,129 @@ def parse_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-def test_connection() -> dict:
-    if not is_live():
-        return {"ok": False, "message": "AI_PROVIDER=mock ya da AI_BASE_URL boş. .env dosyasını doldurup uygulamayı yeniden başlatın."}
+def request_url() -> str:
+    p, base = config.AI_PROVIDER, config.AI_BASE_URL
+    if p == "anthropic":
+        return f"{base[:-3] if base.endswith('/v1') else base}/v1/messages"
+    if p == "azure":
+        return f"{base}/openai/deployments/{config.AI_MODEL}/chat/completions?api-version={config.AI_AZURE_API_VERSION}"
+    if p == "azure_inference":
+        return f"{base}/chat/completions?api-version=2024-05-01-preview"
+    return f"{base}/chat/completions"
+
+
+def diagnose() -> dict:
+    """AI bağlantısını adım adım dener; her adımda ne olduğunu ve ne yapılması gerektiğini söyler."""
+    import os
+    import socket
+    from urllib.parse import urlparse
+
+    steps = []
+
+    def step(name, ok, detail, fix=None):
+        steps.append({"name": name, "ok": ok, "detail": detail, "fix": fix})
+        return ok
+
+    # 1) ayar dosyası
+    if not config.ENV_FILE and not config.AI_BASE_URL:
+        step("Ayar dosyası (.env)", False, f"{config.BASE_DIR} klasöründe .env dosyası bulunamadı.",
+             "Proje klasöründe (içinde app klasörü ve requirements.txt olan klasör) .env.example dosyasının kopyasını .env adıyla oluşturun.")
+        return {"ok": False, "steps": steps}
+    if not config.ENV_FILE:
+        step("Ayar dosyası (.env)", True, "Dosya yok; ayarlar ortam değişkenlerinden okundu (ör. Docker env_file).")
+    if config.ENV_FILE:
+        note = " (adı .env.txt — çalışır, ama .env olarak yeniden adlandırmanız önerilir)" if config.ENV_FILE.name != ".env" else ""
+        step("Ayar dosyası (.env)", True, f"Okundu: {config.ENV_FILE}{note}")
+    # 2) değerler
+    missing = [k for k, v in (("AI_BASE_URL", config.AI_BASE_URL), ("AI_API_KEY", config.AI_API_KEY), ("AI_MODEL", config.AI_MODEL)) if not v]
+    if missing:
+        in_file = [k for k in missing if k in config.ENV_KEYS]
+        step("AI ayarları", False, "Boş: " + ", ".join(missing) + (" (dosyada satır var ama değer boş)" if in_file else ""),
+             "Bu satırları .env dosyasında doldurun, kaydedin ve uygulamayı yeniden başlatın (terminalde Ctrl+C, sonra uvicorn app.main:app --reload).")
+        if "AI_BASE_URL" in missing:
+            return {"ok": False, "steps": steps}
+    else:
+        step("AI ayarları", True, f"Sağlayıcı: {config.AI_PROVIDER} · model/deployment: {config.AI_MODEL} · anahtar: …{config.AI_API_KEY[-4:]}"
+             + (" · " + " · ".join(config.AI_URL_NOTES) if config.AI_URL_NOTES else ""))
+    url = request_url()
+    step("Çağrılacak adres", True, url)
+    host = urlparse(config.AI_BASE_URL).hostname or ""
+    port = urlparse(config.AI_BASE_URL).port or (443 if config.AI_BASE_URL.startswith("https") else 80)
+    proxy = config.AI_PROXY or os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
+    if proxy:
+        step("Proxy", True, f"İstekler şu proxy üzerinden gider: {proxy}")
+    else:
+        # 3) DNS ve 4) TCP (proxy yoksa doğrudan bağlantı denenir)
+        try:
+            ip = socket.gethostbyname(host)
+            step("Adres çözümleme (DNS)", True, f"{host} → {ip}")
+        except OSError as exc:
+            step("Adres çözümleme (DNS)", False, f"{host} bulunamadı: {exc}",
+                 "Adres yanlış yazılmış olabilir ya da bu ağdan görünmüyor olabilir (VPN gerekir mi?). Tarayıcıda adresi açmayı deneyin.")
+            return {"ok": False, "steps": steps}
+        try:
+            with socket.create_connection((host, port), timeout=8):
+                pass
+            step("Ağ bağlantısı", True, f"{host}:{port} portuna ulaşıldı.")
+        except OSError as exc:
+            step("Ağ bağlantısı", False, f"{host}:{port} portuna bağlanılamadı: {exc}",
+                 "Güvenlik duvarı ya da proxy engelliyor olabilir. Şirket ağında proxy gerekiyorsa .env dosyasına AI_PROXY=http://proxy-adresi:port ekleyin; "
+                 "VPN gerekiyorsa bağlanın.")
+            return {"ok": False, "steps": steps}
+    # 5) gerçek istek
     t0 = time.time()
     try:
-        out = complete([{"role": "user", "content": 'Sadece şu JSON\'u döndür: {"durum": "hazir"}'}], json_mode=True, max_tokens=50)
-        return {"ok": True, "message": f"Bağlantı başarılı ({time.time() - t0:.1f} sn). Model yanıtı: {out[:200]}"}
+        out = complete([{"role": "user", "content": 'Sadece şu JSON\'u döndür: {"durum": "hazir"}'}], json_mode=True, max_tokens=50,
+                       retries=1, timeout=45)
+        step("Model yanıtı", True, f"{time.time() - t0:.1f} sn içinde yanıt geldi: {out[:160]}")
+        return {"ok": True, "steps": steps}
     except Exception as exc:
-        return {"ok": False, "message": str(exc)[:800]}
+        msg = str(exc)
+        low = msg.lower()
+        transport = msg.startswith("AI uç noktasına ulaşılamadı")
+        if transport and proxy and ("403" in msg or "407" in msg or "proxy" in low or "tunnel" in low):
+            fix = (f"İstek proxy üzerinden ({proxy}) gidiyor ve proxy bu adrese çıkışı reddetti. Uç nokta şirket içindeyse proxy'yi atlamak için "
+                   f".env dosyasına NO_PROXY={host} ekleyin; dışarıdaysa BT'den bu adres için proxy izni isteyin. "
+                   "Proxy kullanıcı adı/parola istiyorsa: AI_PROXY=http://kullanici:parola@proxy-adresi:port")
+        elif transport and ("refused" in low or "reddedildi" in low):
+            fix = "Sunucu bağlantıyı reddetti: adres doğru ama o portta servis yok. Port numarasını (ör. :443, :8000) ve http/https seçimini kontrol edin."
+        elif transport and ("getaddrinfo" in low or "name or service" in low or "nodename" in low):
+            fix = "Sunucu adı çözümlenemedi: adresi kontrol edin, VPN gerekiyorsa bağlanın."
+        elif "certificate" in low or "ssl" in low:
+            fix = ("Şirket ağının SSL sertifikası tanınmadı. Önce 'pip install -r requirements.txt' komutunu tekrar çalıştırın "
+                   "(Windows sertifika deposunu kullanan truststore paketi kurulur). Düzelmezse BT'den şirket kök sertifikasını (.pem) alıp "
+                   "AI_CA_BUNDLE=C:\\yol\\sirket.pem yazın. Yalnızca denemek için AI_VERIFY_TLS=0.")
+        elif not transport and (" 401" in msg or " 403" in msg):
+            fix = ("Anahtar reddedildi. AI_API_KEY'i kontrol edin (başında/sonunda boşluk ya da tırnak olmasın). Gateway anahtarı farklı bir başlıkta "
+                   "bekliyorsa AI_AUTH_HEADER=api-key ya da AI_AUTH_HEADER=Ocp-Apim-Subscription-Key deneyin.")
+        elif not transport and " 404" in msg and config.AI_PROVIDER.startswith("azure"):
+            fix = ("Azure 'Resource not found' döndü: anahtar doğru, ama adres ya da deployment adı yanlış. Kontrol edin: "
+                   "(1) AI_MODEL, Azure portalındaki model adı değil DEPLOYMENT adıdır (Azure AI Foundry → Deployments listesindeki 'Name'). "
+                   "(2) AI_BASE_URL yalnızca kök olsun: https://<kaynak>.openai.azure.com (ya da .cognitiveservices.azure.com). "
+                   "En kolayı: portaldaki 'Target URI' / 'Endpoint' adresini olduğu gibi AI_BASE_URL'e yapıştırın; uygulama deployment adını ve "
+                   "api-version'ı oradan alır. (3) Deployment yeni oluşturulduysa birkaç dakika bekleyin.")
+        elif not transport and " 404" in msg:
+            fix = ("Adres ya da model bulunamadı. AI_BASE_URL genelde /v1 ile biter (OpenAI uyumlu). Yukarıdaki 'Çağrılacak adres'i API "
+                   "sağlayıcınızın dokümanıyla karşılaştırın; AI_MODEL adını sağlayıcının listesindeki adla birebir yazın.")
+        elif " 400" in msg or " 422" in msg:
+            fix = "İstek reddedildi; çoğunlukla model adı yanlıştır. AI_MODEL değerini sağlayıcının listesindeki adla birebir yazın. Hata metni: yukarıda."
+        elif " 429" in msg:
+            fix = "Kota/hız sınırı. Biraz bekleyip tekrar deneyin ya da sağlayıcıdan kota isteyin."
+        elif "timed out" in low or "timeout" in low:
+            fix = "Zaman aşımı. Proxy gerekiyor olabilir (AI_PROXY) ya da model yavaş yanıt veriyor (AI_TIMEOUT=300)."
+        elif "proxy" in low or "407" in msg:
+            fix = "Proxy kimlik doğrulaması istiyor: AI_PROXY=http://kullanici:parola@proxy-adresi:port"
+        else:
+            fix = "Hata metnini BT ekibiyle ya da benimle paylaşın."
+        step("Model yanıtı", False, msg[:700], fix)
+        return {"ok": False, "steps": steps}
+
+
+def test_connection() -> dict:
+    """Geriye uyumluluk: tek satırlık sonuç."""
+    d = diagnose()
+    last = d["steps"][-1] if d["steps"] else {"detail": "", "fix": None}
+    return {"ok": d["ok"], "message": last["detail"] + (f" → {last['fix']}" if last.get("fix") else ""), "steps": d["steps"]}
 
 
 # ---------------------------------------------------------------- bağlam

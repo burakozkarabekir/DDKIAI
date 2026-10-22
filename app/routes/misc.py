@@ -1,5 +1,6 @@
 """Oturum, AI danışman, AI Security, süreç, ayarlar (departmanlar, AI bağlantısı, depolama) ve yönetim."""
 import json
+import os
 import re
 import secrets
 from datetime import date
@@ -234,15 +235,18 @@ def settings_page(request: Request, user=Depends(require_editor)):
     return settings(request, user)
 
 
-def settings(request: Request, user: dict, preview: dict | None = None):
+def settings(request: Request, user: dict, preview: dict | None = None, test: dict | None = None):
     deps = db.rows("SELECT d.*, (SELECT COUNT(*) FROM projects p WHERE p.department_id = d.id) AS n FROM departments d ORDER BY sort, name")
     ai_cfg = {"provider": config.AI_PROVIDER, "base_url": config.AI_BASE_URL or "—", "model": config.AI_MODEL or "—",
               "key": ("•" * 8 + config.AI_API_KEY[-4:]) if len(config.AI_API_KEY) > 8 else ("tanımlı" if config.AI_API_KEY else "yok"),
-              "auth_header": config.AI_AUTH_HEADER or "varsayılan", "context": config.AI_MAX_CONTEXT_CHARS, "timeout": config.AI_TIMEOUT}
+              "auth_header": config.AI_AUTH_HEADER or "varsayılan", "context": config.AI_MAX_CONTEXT_CHARS, "timeout": config.AI_TIMEOUT,
+              "url": ai.request_url() if config.AI_BASE_URL else "—", "proxy": config.AI_PROXY or os.getenv("HTTPS_PROXY") or "yok",
+              "tls": "kapalı (AI_VERIFY_TLS=0)" if not config.AI_VERIFY_TLS else config.AI_CA_BUNDLE or (
+                  "sistem sertifika deposu" if config.AI_USE_SYSTEM_CERTS else "Python varsayılanı")}
     docs = db.row("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS size, SUM(status = 'hata') AS failed, "
                   "SUM(status = 'metin_yok') AS notext FROM documents")
     return render(request, "settings.html", user, usage=storage.usage(), queue=pipeline.queue_state(), soffice=storage.soffice(),
-                  test=request.session.pop("ai_test", None), demo=seed.demo_present(), preview=preview,
+                  test=test, demo=seed.demo_present(), preview=preview, env_file=config.ENV_FILE,
                   provider_set=config.AI_PROVIDER_SET,
                   failed_jobs=db.rows("SELECT * FROM jobs WHERE status = 'hata' ORDER BY id DESC LIMIT 10"),
                   mock_docs=db.scalar("SELECT COUNT(*) FROM documents WHERE ai_mode = 'mock' OR (ai_mode IS NULL AND status = 'islendi')"),
@@ -292,10 +296,10 @@ def department_delete(request: Request, dep_id: int, user=Depends(require_editor
     return redirect("/ayarlar#departmanlar")
 
 
-@router.post("/ayarlar/ai-test")
+@router.post("/ayarlar/ai-test", response_class=HTMLResponse)
 def ai_test(request: Request, user=Depends(require_editor)):
-    request.session["ai_test"] = ai.test_connection()
-    return redirect("/ayarlar#ai")
+    # Sonuç uzun olabileceği için oturum çerezine yazılmaz; sayfa doğrudan sonuçla çizilir.
+    return settings(request, user, test=ai.diagnose())
 
 
 @router.post("/ayarlar/yeniden-isle")

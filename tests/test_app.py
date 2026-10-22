@@ -309,3 +309,71 @@ def test_provider_autodetect(monkeypatch):
         monkeypatch.setenv("AI_PROVIDER", "mock")
         monkeypatch.setenv("AI_BASE_URL", "")
         importlib.reload(config)
+
+
+def test_azure_url_variants(monkeypatch):
+    """Azure portalından yapıştırılan farklı adres biçimleri doğru isteğe dönüşür."""
+    import importlib
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append((self.path, self.headers.get("api-key"), body.get("model"), "max_tokens" in body))
+            ok_paths = ("/openai/deployments/gpt4o-prod/chat/completions?api-version=2025-01-01-preview",
+                        "/openai/deployments/gpt4o-prod/chat/completions?api-version=2024-10-21", "/openai/v1/chat/completions")
+            if self.path not in ok_paths:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b'{"error":{"code":"404","message": "Resource not found"}}')
+                return
+            if "max_tokens" in body:  # yeni modeller gibi davran
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b'{"error":{"message":"Unsupported parameter: \'max_tokens\'. Use \'max_completion_tokens\' instead."}}')
+                return
+            out = json.dumps({"choices": [{"message": {"content": '{"durum": "hazir"}'}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    # yerel test sunucusu ".azure" içermediği için sağlayıcıyı açıkça azure veriyoruz; adres biçimi yine çözümlenir
+    variants = [
+        ("azure", f"{base}/openai/deployments/gpt4o-prod/chat/completions?api-version=2025-01-01-preview", "", "azure"),
+        ("azure", base, "gpt4o-prod", "azure"),
+        ("azure", f"{base}/openai/v1/", "gpt4o-prod", "azure"),
+    ]
+    monkeypatch.setenv("AI_API_KEY", "anahtar")
+    try:
+        for provider, url, model, expect in variants:
+            monkeypatch.setenv("AI_PROVIDER", provider)
+            monkeypatch.setenv("AI_BASE_URL", url)
+            monkeypatch.setenv("AI_MODEL", model)
+            importlib.reload(config)
+            if url.endswith("/openai/v1/"):
+                config.AI_PROVIDER = "azure_v1"  # gerçek *.azure.com adresinde otomatik algılanır
+            assert config.AI_MODEL == "gpt4o-prod", url
+            r = ai.diagnose()
+            assert r["ok"], (url, r["steps"][-1])
+        assert all(s[1] == "anahtar" for s in seen)  # api-key başlığı
+        assert any(s[0].endswith("2025-01-01-preview") for s in seen)  # api-version adresten alındı
+        assert seen[-1][2] == "gpt4o-prod" and not seen[-1][3]  # v1: model gövdede, max_completion_tokens'a düşüldü
+        # gerçek Azure adlarında otomatik algılama
+        for url, kind in [("https://dogus-ai.openai.azure.com", "azure"), ("https://dogus.cognitiveservices.azure.com/", "azure"),
+                          ("https://dogus.openai.azure.com/openai/v1", "azure_v1"), ("https://x.services.ai.azure.com/models", "azure_inference")]:
+            monkeypatch.setenv("AI_PROVIDER", "auto")
+            monkeypatch.setenv("AI_BASE_URL", url)
+            importlib.reload(config)
+            assert config.AI_PROVIDER == kind, url
+    finally:
+        for k in ("AI_PROVIDER", "AI_BASE_URL", "AI_MODEL", "AI_API_KEY"):
+            monkeypatch.setenv(k, "mock" if k == "AI_PROVIDER" else "")
+        importlib.reload(config)
+        srv.shutdown()
