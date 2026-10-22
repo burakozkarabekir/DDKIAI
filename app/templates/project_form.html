@@ -6,14 +6,16 @@
 <div class="page-head"><div><h1>{{ project.name if project.id else 'Yeni AI projesi' }}</h1>
 <p>Zorunlu olan sadece ad. Diğer alanlar aşama kapılarında aranır: ne kadar erken doldurulursa takip o kadar sağlıklı olur.</p></div></div>
 <form method="post" action="{{ '/projeler/' ~ project.id if project.id else '/projeler' }}" class="stack">
+  {% if request and request.query_params.get('fact') %}<input type="hidden" name="from_fact" value="{{ request.query_params.get('fact') }}">{% endif %}
   <div class="card">
     <h2>Tanım</h2>
     <div class="form-grid">
       <div class="field span3"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"></div>
+      <div class="field span3"><label>Diğer adlar (dokümanlarda geçen farklı isimler, virgülle)</label><input name="aliases" value="{{ project.aliases or '' }}" placeholder="ör. Parça tahminleme, Demand Forecast"><div class="small muted" style="margin-top:3px">AI ve eşleştirme bu adları görünce dokümanı bu projeye bağlar.</div></div>
       <div class="field span3"><label>Kısa özet</label><textarea name="summary" rows="2">{{ project.summary or '' }}</textarea></div>
       <div class="field span3"><label>Problem / fırsat</label><textarea name="problem">{{ project.problem or '' }}</textarea></div>
       <div class="field span3"><label>Önerilen çözüm</label><textarea name="solution">{{ project.solution or '' }}</textarea></div>
-      <div class="field"><label>Değer zinciri alanı</label><select name="value_chain"><option value="">—</option>{{ opt(D.VALUE_CHAIN, project.value_chain) }}</select></div>
+      <div class="field"><label>Departman</label><select name="department_id"><option value="">—</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if project.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select><div class="small muted" style="margin-top:3px"><a href="/ayarlar#departmanlar">Departmanları düzenle</a></div></div>
       <div class="field"><label>İş birimi</label><input name="business_unit" value="{{ project.business_unit or '' }}"></div>
       <div class="field"><label>Markalar</label><input name="brands" value="{{ project.brands or '' }}" placeholder="ör. Volkswagen, Audi"></div>
       <div class="field"><label>AI tipi</label><select name="ai_type"><option value="">—</option>{{ opt(D.AI_TYPES, project.ai_type) }}</select></div>
@@ -31,15 +33,14 @@
       <div class="field"><label>Hedef canlı tarihi</label><input type="date" name="target_date" value="{{ project.target_date or '' }}"></div>
       <div class="field"><label>Canlıya geçiş</label><input type="date" name="golive_date" value="{{ project.golive_date or '' }}"></div>
       <div class="field"><label>Sağlık</label><select name="health">{% for k, v in D.HEALTH.items() %}<option value="{{ k }}" {{ 'selected' if project.health == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
-      <div class="field span2"><label class="row" style="margin-top:26px"><input type="checkbox" name="visible_to_dt" value="1" {{ 'checked' if project.visible_to_dt }}> Doğuş Teknoloji kullanıcıları bu projeyi görebilir</label></div>
     </div>
   </div>
   <div class="card">
     <h2>Değer & Ölçümleme</h2>
     <div class="form-grid">
-      <div class="field"><label>Tahmini yıllık değer (TL)</label><input name="estimated_value" inputmode="decimal" value="{{ '%.0f'|format(project.estimated_value) if project.estimated_value is not none else '' }}"></div>
-      <div class="field"><label>Gerçekleşen yıllık değer (TL)</label><input name="realized_value" inputmode="decimal" value="{{ '%.0f'|format(project.realized_value) if project.realized_value is not none else '' }}"></div>
-      <div class="field"><label>FTE kazanımı</label><input name="fte_saving" inputmode="decimal" value="{{ project.fte_saving if project.fte_saving is not none else '' }}"></div>
+      <div class="field"><label>Tahmini yıllık değer (TL)</label><input name="estimated_value" inputmode="decimal" value="{{ '%.0f'|format(project.estimated_value) if project.estimated_value is defined and project.estimated_value is not none else '' }}"></div>
+      <div class="field"><label>Gerçekleşen yıllık değer (TL)</label><input name="realized_value" inputmode="decimal" value="{{ '%.0f'|format(project.realized_value) if project.realized_value is defined and project.realized_value is not none else '' }}"></div>
+      <div class="field"><label>FTE kazanımı</label><input name="fte_saving" inputmode="decimal" value="{{ project.fte_saving if project.fte_saving is defined and project.fte_saving is not none else '' }}"></div>
       <div class="field"><label>Ölçümleme durumu</label><select name="measurement_status">{% for k, l in D.MEASUREMENT %}<option value="{{ k }}" {{ 'selected' if project.measurement_status == k }}>{{ l }}</option>{% endfor %}</select></div>
     </div>
   </div>

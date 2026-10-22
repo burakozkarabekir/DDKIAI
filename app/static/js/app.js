@@ -54,16 +54,29 @@
     tip.style.top = (e.clientY - 34) + "px";
   });
 
-  // Rapor analizi bekleniyorsa durumu yokla
-  const pending = document.querySelector("[data-report-pending]");
-  if (pending) {
-    const id = pending.dataset.reportPending;
-    const poll = () => fetch(`/api/raporlar/${id}/durum`).then((r) => r.json()).then((d) => {
-      if (d.status === "tamam" || d.status === "hata") location.reload();
-      else setTimeout(poll, 3000);
-    }).catch(() => setTimeout(poll, 6000));
+  // İşlenen dokümanlar / arka plan işleri bitince sayfayı yenile
+  const docs = document.querySelector("[data-poll-docs]");
+  if (docs && docs.dataset.pollDocs) {
+    const poll = () => fetch(`/api/dokumanlar/durum?ids=${docs.dataset.pollDocs}`).then((r) => r.json()).then((d) => {
+      if (!d.pending) location.reload(); else setTimeout(poll, 3000);
+    }).catch(() => setTimeout(poll, 8000));
     setTimeout(poll, 2500);
   }
+  const job = document.querySelector("[data-poll-job]");
+  if (job) {
+    const poll = () => fetch(`/api/is/${job.dataset.pollJob}`).then((r) => r.json()).then((d) => {
+      if (d.status === "tamam" || d.status === "hata" || !d.status) location.reload(); else setTimeout(poll, 3000);
+    }).catch(() => setTimeout(poll, 8000));
+    setTimeout(poll, 2500);
+  }
+
+  // Sürükle-bırak yükleme alanı
+  document.querySelectorAll(".drop").forEach((zone) => {
+    const input = zone.querySelector("input[type=file]");
+    ["dragenter", "dragover"].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add("over"); }));
+    ["dragleave", "drop"].forEach((ev) => zone.addEventListener(ev, () => zone.classList.remove("over")));
+    zone.addEventListener("drop", (e) => { e.preventDefault(); input.files = e.dataTransfer.files; });
+  });
 
   // AI danışman sohbeti
   const form = document.querySelector("#chat-form");

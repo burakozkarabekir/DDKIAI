@@ -3,12 +3,12 @@
 {% block crumbs %}{{ ai_label() }}{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>AI Danışman</h1>
-<p>Portföy, haftalık raporlar, kurumsal yapı ve AI Security metriklerini bilen danışman. Proje sorularına, genel AI sorularına ve "nereye odaklanmalıyız?" sorusuna yanıt verir.</p></div></div>
+<p>Portföyü, yüklenen tüm dokümanları (tam metin aramayla), departmanları ve AI Security metriklerini bilen danışman. Yanıtlarda kaynak dokümanı <span class="cite">D12</span> gibi gösterir.</p></div></div>
 <div class="grid g-main">
   <div class="card chat">
     <div class="card-head"><h2>Sohbet</h2>{% if messages %}<form method="post" action="/danisman/temizle" data-confirm="Sohbet geçmişi silinsin mi?"><button class="btn ghost sm">Geçmişi temizle</button></form>{% endif %}</div>
     <div class="chips">
-      {% for q in ['Bu hafta hangi projeler takılma riski taşıyor ve neden?', 'Canlıdaki projelerin ölçümleme durumu ne? Hangi KPI eksik?', 'Önümüzdeki çeyrekte hangi 3 alana odaklanmalıyız?', 'Shadow AI riskini azaltmak için ne yapmalıyız?', 'DT ile çalışma modelimizde ne iyileştirilmeli?'] %}
+      {% for q in ['Bu hafta hangi projeler takılma riski taşıyor ve neden?', 'Canlıdaki projelerin ölçümleme durumu ne? Hangi KPI eksik?', 'Önümüzdeki çeyrekte hangi 3 alana odaklanmalıyız?', 'Shadow AI riskini azaltmak için ne yapmalıyız?', 'DT raporları ile iç notlarımız nerede çelişiyor?'] %}
       <button class="chip" type="button" data-ask="{{ q }}">{{ q }}</button>{% endfor %}
     </div>
     <div class="chat-log" id="chat-log">
@@ -20,14 +20,16 @@
   <div class="stack">
     <div class="card">
       <h2>Boşluk & Odak Analizi</h2>
-      <p class="small">AI; kurumsal yapıyı, değer zincirini ve tüm projeleri tarar. Eksik olduğumuz alanları ve odaklanmamız gereken 3 alanı raporlar.</p>
-      <form method="post" action="/danisman/bosluk-analizi"><button class="btn primary" data-busy="Analiz ediliyor… (1-2 dk)">✦ Yeni analiz üret</button></form>
-      <p class="small muted" style="margin:10px 0 0">Daha iyi sonuç için <a href="/kurumsal-yapi">Kurumsal Yapı</a> sayfasındaki birimleri ve ağrı noktalarını güncel tutun.</p>
+      <p class="small">AI; departmanları, ağrı noktalarını ve tüm projeleri tarar. Eksik olduğumuz alanları ve odaklanmamız gereken 3 alanı raporlar.</p>
+      <div class="row"><form method="post" action="/danisman/analiz/gap"><button class="btn primary sm">✦ Boşluk analizi</button></form>
+        <form method="post" action="/danisman/analiz/weekly"><button class="btn sm">✦ Haftalık portföy yorumu</button></form></div>
+      {% if gap_running %}<p class="small muted" style="margin:10px 0 0">Analiz hazırlanıyor…</p>{% endif %}
+      <p class="small muted" style="margin:10px 0 0">Daha iyi sonuç için <a href="/ayarlar#departmanlar">departmanları ve ağrı noktalarını</a> güncel tutun.</p>
     </div>
     <div class="card">
       <h2>AI içgörü arşivi</h2>
       <ul class="list-plain">{% for i in insights %}
-        <li><a href="/danisman/icgoru/{{ i.id }}">{{ i.title }}</a><div class="small muted">{{ {'gap':'Boşluk analizi','weekly':'Haftalık rapor'}.get(i.kind, i.kind) }} · {{ i.created_at|date }}</div></li>
+        <li><a href="/danisman/icgoru/{{ i.id }}">{{ i.title }}{% if i.code %} · {{ i.code }}{% endif %}</a><div class="small muted">{{ {'gap':'Boşluk analizi','weekly':'Haftalık yorum','project':'Proje sentezi'}.get(i.kind, i.kind) }} · {{ i.created_at|date }}</div></li>
       {% else %}<li class="muted">Henüz içgörü yok.</li>{% endfor %}</ul>
     </div>
   </div>

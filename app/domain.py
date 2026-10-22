@@ -50,31 +50,65 @@ DATA_CLASSES = ["Genel", "Dahili", "Gizli", "Kişisel Veri (KVKK)"]
 AI_TYPES = ["Üretken AI (LLM)", "Makine Öğrenmesi", "Görüntü İşleme", "Doküman/OCR", "Ajan / Otomasyon", "Diğer"]
 PRIORITIES = ["Yüksek", "Orta", "Düşük"]
 
-VALUE_CHAIN = [
-    "Satış & Bayi Yönetimi",
-    "Satış Sonrası & Servis",
-    "Yedek Parça & Lojistik",
-    "Müşteri Deneyimi & CRM",
-    "Pazarlama",
-    "Finans & Muhasebe",
-    "İnsan Kaynakları",
-    "Tedarik Zinciri & Satın Alma",
-    "Filo & Kiralama",
-    "Kurumsal Hizmetler & Hukuk",
-    "BT & Siber Güvenlik",
+# Varsayılan departmanlar — ilk kurulumda yüklenir, sonra Ayarlar > Departmanlar'dan yönetilir.
+DEFAULT_DEPARTMENTS = [
+    ("Satış", "Marka satış organizasyonları ve bayi ağı"),
+    ("Satış Sonrası Hizmetler", "Servis ağı, garanti ve teknik destek"),
+    ("Yedek Parça & Lojistik", "Parça planlama, depo ve dağıtım"),
+    ("Müşteri Deneyimi & CRM", "Çağrı merkezi, şikâyet ve müşteri ilişkileri"),
+    ("Pazarlama", "Kampanya ve marka iletişimi"),
+    ("Finans", "Muhasebe, hazine, bütçe ve raporlama"),
+    ("İnsan Kaynakları", "İşe alım, yetenek ve çalışan deneyimi"),
+    ("Satın Alma", "Dolaylı satın alma ve tedarikçi yönetimi"),
+    ("Filo Kiralama", "Kurumsal filo kiralama operasyonu"),
+    ("Hukuk & Uyum", "Sözleşmeler, uyum ve kurumsal hizmetler"),
+    ("Bilgi Teknolojileri & Güvenlik", "Altyapı, uygulamalar ve siber güvenlik"),
 ]
 
-DOC_CATEGORIES = [
-    "İş Analizi / Business Case",
-    "Gereksinim",
-    "Teknik Tasarım",
-    "Güvenlik Değerlendirmesi",
-    "Pilot Sonuç Raporu",
-    "Ölçüm Raporu",
-    "Sunum",
-    "Sözleşme / Teklif",
-    "Diğer",
-]
+# Doküman türleri: her tür için AI'a ne arayacağı söylenir (bkz. ai.EXTRACT_PROMPT).
+DOC_TYPES = {
+    "dt_durum": ("DT Durum Raporu", "Doğuş Teknoloji'nin dönemsel proje durum raporu (çok projeli)."),
+    "ic_not": ("İç Notlar / Değerlendirme", "Dijital Dönüşüm ekibinin projeler hakkındaki notları, toplantı ve komite notları."),
+    "pdd": ("PDD / Proje Tanım Dokümanı", "Problem, kapsam, çözüm, hedef KPI, takvim, sorumlular."),
+    "kazanim": ("Kazanım / Fayda Dokümanı", "Gerçekleşen ve beklenen fayda: TL, FTE, KPI değerleri, ölçüm yöntemi."),
+    "business_case": ("Business Case", "İş değeri, maliyet, yatırım geri dönüşü, tahmini değer."),
+    "teknik": ("Teknik Tasarım / Gereksinim", "Mimari, gereksinim, entegrasyon, veri kaynakları."),
+    "guvenlik": ("Güvenlik Değerlendirmesi", "AI risk ve güvenlik değerlendirmesi, veri sınıfı, onay durumu."),
+    "pilot": ("Pilot Sonuç Raporu", "Pilot kapsamı, sonuçlar, baseline ve kararlar."),
+    "toplanti": ("Toplantı / Komite Kararı", "Kararlar, aksiyonlar, sorumlular ve terminler."),
+    "sunum": ("Sunum", "Yönetim veya proje sunumları."),
+    "sozlesme": ("Sözleşme / Teklif", "Teklif, kapsam, bedel ve sözleşme şartları."),
+    "diger": ("Diğer", "Sınıflandırılamayan doküman."),
+}
+DOC_SOURCES = ["Doğuş Teknoloji", "Dijital Dönüşüm", "İş Birimi", "Yönetim", "Dış Kaynak"]
+
+# Dokümanlardan çıkarılan bilgi türleri.
+# apply: None = bilgi amaçlı (projenin bilgi akışına düşer), aksi hâlde onaylanınca neyi güncellediği.
+FACT_TYPES = {
+    "durum": ("Durum", None),
+    "risk": ("Risk", None),
+    "engel": ("Engel / Bağımlılık", None),
+    "sonraki_adim": ("Sonraki adım", None),
+    "karar": ("Karar", None),
+    "olcum": ("Ölçüm notu", None),
+    "not": ("Not", None),
+    "saglik": ("Sağlık önerisi", "project.health"),
+    "asama": ("Aşama önerisi", "project.stage"),
+    "tarih": ("Tarih", "project.<field>"),
+    "tanim": ("Proje tanımı", "project.<field>"),
+    "kazanim": ("Kazanım / değer", "project.<field>"),
+    "kpi": ("KPI değeri", "kpi"),
+    "aksiyon": ("Aksiyon", "action"),
+}
+FACT_FIELDS = {
+    "tarih": {"start_date": "Başlangıç", "target_date": "Hedef canlı tarihi", "golive_date": "Canlıya geçiş"},
+    "tanim": {"summary": "Özet", "problem": "Problem", "solution": "Çözüm", "sponsor": "Sponsor", "owner": "DO sorumlusu",
+              "dt_lead": "DT sorumlusu", "brands": "Markalar", "ai_type": "AI tipi", "data_class": "Veri sınıfı",
+              "security_review": "Güvenlik değerlendirmesi"},
+    "kazanim": {"estimated_value": "Tahmini yıllık değer (TL)", "realized_value": "Gerçekleşen yıllık değer (TL)",
+                "fte_saving": "FTE kazanımı", "measurement_status": "Ölçümleme durumu"},
+}
+KPI_PARTS = {"baseline": "Baseline", "target": "Hedef", "actual": "Gerçekleşen"}
 
 # Roller. "dt" Doğuş Teknoloji kullanıcılarıdır: yalnızca DT'ye açık projeleri görür,
 # AI danışman, AI içgörüleri ve güvenlik metrikleri iç kullanıma ayrılmıştır.
@@ -92,9 +126,10 @@ INTERNAL = {"admin", "dde", "executive", "viewer"}
 ACTION_STATUS = {"acik": "Açık", "kapali": "Kapandı"}
 
 
-def gate_checks(project: dict, kpis: list, doc_categories: set) -> dict:
+def gate_checks(project: dict, kpis: list, doc_types: set) -> dict:
     """Bir sonraki aşamaya geçiş için kapı kriterlerini değerlendirir.
 
+    doc_types: projeye bağlı dokümanların tür anahtarları (DOC_TYPES).
     Dönüş: {stage_key: [(kriter, sağlandı_mı), ...]} — her aşama için o aşamaya
     girmeden önce sağlanması beklenen kriterler.
     """
@@ -110,7 +145,7 @@ def gate_checks(project: dict, kpis: list, doc_categories: set) -> dict:
         "onay": [
             ("Hedef KPI tanımlandı", has_kpi),
             ("Tahmini yıllık değer girildi", bool(project.get("estimated_value"))),
-            ("Business case dokümanı yüklendi", "İş Analizi / Business Case" in doc_categories),
+            ("Business case veya PDD yüklendi", bool({"business_case", "pdd"} & doc_types)),
         ],
         "gelistirme": [
             ("DT sorumlusu atandı", bool(project.get("dt_lead"))),
@@ -119,12 +154,12 @@ def gate_checks(project: dict, kpis: list, doc_categories: set) -> dict:
         ],
         "pilot": [
             ("AI güvenlik değerlendirmesi başladı", project.get("security_review") in ("devam", "onaylandi", "sartli")),
-            ("Gereksinim / teknik tasarım dokümanı var", bool({"Gereksinim", "Teknik Tasarım"} & doc_categories)),
+            ("PDD veya teknik tasarım dokümanı var", bool({"pdd", "teknik"} & doc_types)),
         ],
         "canli": [
             ("Baseline ölçüm alındı", has_baseline),
             ("Güvenlik onayı var", project.get("security_review") in ("onaylandi", "sartli")),
-            ("Pilot sonuç raporu yüklendi", "Pilot Sonuç Raporu" in doc_categories),
+            ("Pilot sonuç raporu yüklendi", "pilot" in doc_types),
         ],
         "olcekleme": [
             ("Gerçekleşen KPI değeri girildi", has_actual),

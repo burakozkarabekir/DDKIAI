@@ -1,7 +1,8 @@
 """Kimlik doğrulama ve yetkilendirme.
 
-Şimdilik yerel kullanıcı + parola (PBKDF2). Active Directory / LDAP ya da Entra ID SSO
-eklenmek istenirse `authenticate` fonksiyonu tek giriş noktasıdır.
+AUTH_ENABLED=0 (varsayılan): giriş ekranı kapalıdır, herkes "Dijital Dönüşüm Ekibi" ortak kullanıcısıyla
+çalışır. Kullanıcı, rol ve parola altyapısı yerinde durur; AUTH_ENABLED=1 yapılınca giriş ekranı geri gelir.
+Active Directory / Entra ID SSO eklenmek istenirse `authenticate` fonksiyonu tek giriş noktasıdır.
 """
 import hashlib
 import hmac
@@ -11,7 +12,7 @@ from collections import defaultdict
 
 from fastapi import HTTPException, Request
 
-from . import db
+from . import config, db
 from .domain import CAN_EDIT, CAN_UPLOAD, INTERNAL
 
 _ITER = 260_000
@@ -52,7 +53,16 @@ def authenticate(email: str, password: str) -> dict | None:
     return user
 
 
+TEAM_EMAIL = "ekip@ai-impact.local"
+
+
+def team_user() -> dict | None:
+    return db.row("SELECT * FROM users WHERE email = ?", (TEAM_EMAIL,))
+
+
 def current_user(request: Request) -> dict | None:
+    if not config.AUTH_ENABLED:
+        return team_user()
     uid = request.session.get("uid")
     if not uid:
         return None

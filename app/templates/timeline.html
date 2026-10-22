@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Zaman Çizelgesi{% endblock %}
+{% block crumbs %}{{ s.total }} proje{% if s.undated %} · {{ s.undated }} projenin başlangıç tarihi yok{% endif %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Zaman Çizelgesi</h1>
+<p>Hangi proje ne zaman başladı, ne zaman canlıya çıktı, hangisi hedef tarihini geçti — tek bakışta.</p></div>
+<div class="seg"><a href="?grup=dept&departman={{ f.departman }}&stage={{ f.stage }}&yil={{ f.yil }}" class="{{ 'on' if f.grup != 'asama' }}">Departmana göre</a><a href="?grup=asama&departman={{ f.departman }}&stage={{ f.stage }}&yil={{ f.yil }}" class="{{ 'on' if f.grup == 'asama' }}">Aşamaya göre</a></div></div>
+<form class="filters" method="get">
+  <input type="hidden" name="grup" value="{{ f.grup }}">
+  <select name="departman" data-autosubmit><option value="">Tüm departmanlar</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if f.departman == d.id|string }}>{{ d.name }}</option>{% endfor %}</select>
+  <select name="stage" data-autosubmit><option value="">Tüm aşamalar</option>{% for k, l, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if f.stage == k }}>{{ l }}</option>{% endfor %}</select>
+  <select name="yil" data-autosubmit><option value="">Tüm yıllar</option>{% for y in years %}<option {{ 'selected' if f.yil == y|string }}>{{ y }}</option>{% endfor %}</select>
+</form>
+<div class="grid g4" style="grid-template-columns:repeat(6,minmax(0,1fr))">
+  {% for label, val, sub in [('Toplam proje', s.total, s.pipeline ~ ' fikir/analizde'), ('Tamamlanan', s.done, 'bu yıl ' ~ s.done_this_year), ('Devam eden', s.ongoing, 'onay · geliştirme · pilot'), ('Hedefi geçmiş', s.overdue, 'canlıya çıkmadı'), ('90 gün içinde hedef', s.due_90, 'yaklaşan canlıya geçiş'), ('Ort. canlıya çıkış', (s.avg_days ~ ' gün') if s.avg_days else '—', 'başlangıç → canlı')] %}
+  <div class="card stat"><div class="label">{{ label }}</div><div class="value {{ 'risk hi' if label == 'Hedefi geçmiş' and val }}">{{ val }}</div><div class="sub">{{ sub }}</div></div>
+  {% endfor %}
+</div>
+<div class="card" style="margin-top:16px">
+  <div class="card-head"><h2>Proje zaman çizelgesi</h2>
+    <div class="legend" style="margin:0"><span><i class="lg done"></i>Tamamlandı (başlangıç → canlı)</span><span><i class="lg active"></i>Devam ediyor</span><span><i class="lg plan"></i>Planlanan (hedefe kadar)</span><span><i class="lg late"></i>Gecikme</span><span>◆ hedef</span><span>● canlıya geçiş</span></div></div>
+  <div class="gantt-wrap">{{ gantt }}</div>
+</div>
+<div class="grid g2" style="margin-top:16px">
+  <div class="card"><div class="card-head"><h2>Çeyrek bazında başlayan ve tamamlanan</h2></div>{{ bars }}
+    <div class="legend"><span><i style="background:var(--s1)"></i>Başlayan</span><span><i style="background:var(--s2)"></i>Tamamlanan</span></div></div>
+  <div class="card"><div class="card-head"><h2>Kümülatif tamamlanan proje</h2></div>{{ cumulative }}</div>
+</div>
+<div class="table-wrap" style="margin-top:16px">
+  <table>
+    <thead><tr><th>Çeyrek</th><th>Başlayan</th><th>Tamamlanan</th><th>Hedefi bu çeyrekte olan (açık)</th></tr></thead>
+    <tbody>{% for q in quarters|reverse %}<tr><td class="nowrap"><b>{{ q.label }}</b></td>
+      <td class="small">{% for p in q.started %}<a href="/projeler/{{ p.id }}">{{ p.code }}</a>{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
+      <td class="small">{% for p in q.done %}<a href="/projeler/{{ p.id }}">{{ p.code }}</a>{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
+      <td class="small">{% for p in q.planned %}<a href="/projeler/{{ p.id }}" class="{{ 'health kirmizi' if p.overdue }}">{{ p.code }}</a>{{ ', ' if not loop.last }}{% else %}—{% endfor %}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import health, stage, risk, comments_block, upload_form %}
+{% from "partials/macros.html" import health, stage, risk, comments_block, upload_form, doc_type %}
 {% block title %}{{ p.code }} {{ p.name }}{% endblock %}
 {% block crumbs %}<a href="/projeler">Projeler</a> / {{ p.code }}{% endblock %}
 {% block topactions %}
-{% if user.role != 'dt' %}<form method="post" action="/projeler/{{ p.id }}/ai-degerlendirme"><button class="btn" data-busy="AI değerlendiriyor…">✦ AI değerlendirmesi iste</button></form>{% endif %}
+{% if user.role != 'dt' %}<form method="post" action="/projeler/{{ p.id }}/sentez"><button class="btn" data-busy="Kuyruğa alınıyor…">✦ Tüm kaynaklardan sentez üret</button></form>{% endif %}
 {% if user.role in D.CAN_EDIT %}<a class="btn primary" href="/projeler/{{ p.id }}/duzenle">Düzenle</a>{% endif %}
 {% endblock %}
 {% block content %}
@@ -25,14 +25,15 @@
 </div>
 {% if cur == -1 %}<p class="small muted">Proje şu an akış dışında: <b>{{ D.STAGE_LABELS[p.stage] }}</b></p>{% endif %}
 
-{% set counts = {'dokuman': documents|length, 'yorumlar': comments|length, 'aksiyon': actions|selectattr('status','equalto','acik')|list|length, 'durum': updates|length, 'etki': kpis|length} %}
+{% set counts = {'dokuman': documents|length, 'yorumlar': comments|length, 'aksiyon': actions|selectattr('status','equalto','acik')|list|length, 'bilgi': pending|length, 'etki': kpis|length} %}
 <nav class="tabs" style="margin-top:18px">
-  {% for key, label in [('genel','Genel Bakış'),('etki','Etki & Ölçümleme'),('durum','Haftalık Durum'),('dokuman','Dokümanlar'),('aksiyon','Aksiyonlar'),('yorumlar','Yorumlar'),('tarihce','Tarihçe')] %}
+  {% for key, label in [('genel','Genel Bakış'),('bilgi','Bilgi & Kaynaklar'),('etki','Etki & Ölçümleme'),('dokuman','Dokümanlar'),('aksiyon','Aksiyonlar'),('yorumlar','Yorumlar'),('tarihce','Tarihçe')] %}
   <a href="?tab={{ key }}" class="{{ 'on' if tab == key }}">{{ label }}{% if counts.get(key) %}<span class="count">{{ counts[key] }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 
 {% if tab == 'genel' %}
+{% if pending %}<div class="flash warn"><b>{{ pending|length }} öneri</b> dokümanlardan geldi ve onay bekliyor. <a href="?tab=bilgi">İncele →</a></div>{% endif %}
 <div class="grid g-main">
   <div class="stack">
     <div class="card">
@@ -44,7 +45,7 @@
     <div class="card">
       <h3>Künye</h3>
       <table>
-        <tr><td class="muted">Değer zinciri</td><td>{{ p.value_chain or '—' }}</td><td class="muted">İş birimi</td><td>{{ p.business_unit or '—' }}</td></tr>
+        <tr><td class="muted">Departman</td><td>{{ p.dept or '—' }}</td><td class="muted">İş birimi</td><td>{{ p.business_unit or '—' }}</td></tr>
         <tr><td class="muted">Markalar</td><td>{{ p.brands or '—' }}</td><td class="muted">AI tipi</td><td>{{ p.ai_type or '—' }}</td></tr>
         <tr><td class="muted">Sponsor</td><td>{{ p.sponsor or '—' }}</td><td class="muted">DO sorumlusu</td><td>{{ p.owner or '—' }}</td></tr>
         <tr><td class="muted">DT sorumlusu</td><td>{{ p.dt_lead or '—' }}</td><td class="muted">Başlangıç</td><td>{{ p.start_date|date }}</td></tr>
@@ -53,6 +54,7 @@
         <tr><td class="muted">FTE kazanımı</td><td>{{ p.fte_saving|num }}</td><td class="muted">Ölçümleme</td><td>{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</td></tr>
         <tr><td class="muted">Güvenlik değ.</td><td>{{ D.SECURITY_REVIEW_LABELS[p.security_review] }}</td><td class="muted">Veri sınıfı</td><td>{{ p.data_class or '—' }}</td></tr>
         <tr><td class="muted">Son durum</td><td>{{ p.last_status_at|ago }}</td><td class="muted">Son güncelleme</td><td>{{ p.updated_at|ago }}</td></tr>
+        {% if p.aliases %}<tr><td class="muted">Diğer adlar</td><td colspan="3">{{ p.aliases }}</td></tr>{% endif %}
       </table>
     </div>
     {% if user.role != 'dt' and p.ai_risk_note %}
@@ -133,33 +135,65 @@
   {% endif %}
 </div>
 
-{% elif tab == 'durum' %}
-<div class="stack">
-{% for u in updates %}
-  <div class="card">
-    <div class="card-head"><h3><a href="/raporlar/{{ u.rid }}">{{ u.week_start|date }} haftası</a></h3><div class="row">{% if u.suggested_health %}{{ health(u.suggested_health) }}{% endif %}{% if user.role != 'dt' %}<span class="small muted">Risk</span>{{ risk(u.risk_score) }}{% endif %}</div></div>
-    <p>{{ u.status_text }}</p>
-    <div class="grid g3 small">
-      <div><b>Engeller</b><ul>{% for b in u.blockers|fromjson %}<li>{{ b }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul></div>
-      <div><b>Sonraki adımlar</b><ul>{% for b in u.next_steps|fromjson %}<li>{{ b }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul></div>
-      {% if user.role != 'dt' %}<div><b>AI yorumu</b><p>{{ u.ai_comment or '—' }}</p></div>{% endif %}
+{% elif tab == 'bilgi' %}
+<div class="grid g-main">
+  <div class="stack">
+    <div class="card" {% if synth_job %}data-poll-job="synthesis/{{ p.id }}"{% endif %}>
+      <div class="card-head"><h2>AI sentezi</h2><span class="muted small">{% if synthesis %}{{ synthesis.created_at|ago }} · {% endif %}tüm dokümanlar + yorumlar birlikte</span></div>
+      {% if synth_job %}<p class="muted">Sentez hazırlanıyor… Sayfa hazır olunca yenilenecek.</p>
+      {% elif synthesis %}<div class="prose">{{ synthesis.body|md }}</div>
+      {% else %}<p class="muted">Henüz sentez yok. Sağ üstteki <b>Tüm kaynaklardan sentez üret</b> ile DT raporlarını, iç notları, PDD ve kazanım dokümanlarını birlikte değerlendirin.</p>{% endif %}
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Bilgi akışı</h2><span class="muted small">Dokümanlardan çıkarılan durum, risk, karar ve notlar · yeniden eskiye</span></div>
+      <ul class="feed">{% for f in status_timeline %}
+        <li class="ft-{{ f.fact_type }}">
+          <div class="row small"><span class="badge">{{ f.label }}</span><span class="muted">{{ f.as_of|date }}</span><span class="spacer"></span>{{ doc_type(f.doc_type) }}<a class="cite" href="/dokumanlar/{{ f.document_id }}" title="{{ f.dtitle }}">D{{ f.document_id }}</a></div>
+          <div class="small" style="margin-top:3px">{% if f.fact_type == 'saglik' %}{{ health(f.value_text) }} <span class="muted">risk {{ f.value_num|num }}</span> · {{ f.evidence or '' }}{% else %}{{ f.display }}{% endif %}</div>
+        </li>
+      {% else %}<li class="empty">Bu projeye bağlı dokümanlardan henüz bilgi çıkarılmadı.</li>{% endfor %}</ul>
     </div>
   </div>
-{% else %}<div class="card empty">Bu proje henüz hiçbir haftalık raporda geçmedi.</div>{% endfor %}
+  <div class="stack">
+    <div class="card">
+      <div class="card-head"><h3>Onay bekleyen öneriler</h3><span class="badge">{{ pending|length }}</span></div>
+      {% if pending %}
+      <form method="post" action="/inceleme">
+        {% for f in pending %}
+        <label class="suggest"><input type="checkbox" name="fact_id" value="{{ f.id }}" checked>
+          <span><b>{{ f.label }}</b><br><span class="small"><span class="muted">{{ f.current|truncate(60) }}</span> → <b>{{ f.display|truncate(140) }}</b></span>
+          <br><span class="small muted">{{ D.DOC_TYPES[f.doc_type][0] }} · <a class="cite" href="/dokumanlar/{{ f.document_id }}">D{{ f.document_id }}</a>{% if f.evidence %} · “{{ f.evidence|truncate(90) }}”{% endif %}</span></span></label>
+        {% endfor %}
+        <div class="row" style="margin-top:10px"><button class="btn primary sm" name="action" value="onayla">Seçilenleri uygula</button><button class="btn ghost sm" name="action" value="reddet">Reddet</button></div>
+      </form>
+      {% else %}<p class="small muted" style="margin:0">Bekleyen öneri yok.</p>{% endif %}
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Kaynaklar arası çelişkiler</h3><span class="badge">{{ conflicts|length }}</span></div>
+      {% for c in conflicts %}
+      <div style="margin-bottom:10px"><b class="small">{{ c.label }}</b>
+        {% for f in c.facts %}<div class="small row"><span>{{ f.display }}</span><span class="spacer"></span><span class="muted">{{ D.DOC_TYPES[f.doc_type][0] }}</span><a class="cite" href="/dokumanlar/{{ f.document_id }}">D{{ f.document_id }}</a></div>{% endfor %}</div>
+      {% else %}<p class="small muted" style="margin:0">Çelişki yok.</p>{% endfor %}
+    </div>
+    <div class="card">
+      <h3>Kaynak dokümanlar</h3>
+      <ul class="list-plain small">{% for d in documents[:8] %}<li class="row"><a href="/dokumanlar/{{ d.id }}">{{ d.title|truncate(38) }}</a><span class="spacer"></span>{{ doc_type(d.doc_type) }}</li>{% else %}<li class="muted">Bağlı doküman yok.</li>{% endfor %}</ul>
+    </div>
+  </div>
 </div>
 
 {% elif tab == 'dokuman' %}
 <div class="card">
-  {% if user.role in D.CAN_UPLOAD %}{{ upload_form(project_id=p.id) }}<hr>{% endif %}
+  {% if user.role in D.CAN_UPLOAD %}{{ upload_form(project_id=p.id) }}<p class="small muted" style="margin:8px 0 0">Buradan yüklenen dokümanlar bu projeye bağlanır; içerikte başka projeler geçiyorsa onlara da otomatik bağlanır.</p><hr>{% endif %}
   <div class="table-wrap" style="border:0"><table>
-    <thead><tr><th>Doküman</th><th>Kategori</th><th>Yükleyen</th><th>Tarih</th><th class="num">Boyut</th><th></th></tr></thead>
+    <thead><tr><th>Doküman</th><th>Tür</th><th>Tarih</th><th>Bağ</th><th class="num">Boyut</th></tr></thead>
     <tbody>{% for d in documents %}
-    <tr><td><a href="/dokuman/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ d.filename }}</div></td><td class="small">{{ d.category }}</td>
-      <td class="small">{{ d.uname }}</td><td class="small">{{ d.uploaded_at|date }}</td><td class="num small">{{ ((d.size or 0) / 1024)|round|int }} KB</td>
-      <td>{% if editor %}<form method="post" action="/dokuman/{{ d.id }}/sil" data-confirm="Doküman silinsin mi?"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="6" class="empty">Doküman yok.</td></tr>{% endfor %}</tbody>
+    <tr><td><a href="/dokumanlar/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ d.filename }} · {{ d.source or '—' }}</div></td><td>{{ doc_type(d.doc_type) }}</td>
+      <td class="small nowrap">{{ (d.doc_date or d.uploaded_at)|date }}</td>
+      <td class="small">{{ {'manuel':'Elle','kod':'Kod geçiyor','isim':'Ad geçiyor','ai':'AI eşleştirdi'}[d.method] }}{% if d.mentions %} · {{ d.mentions }}×{% endif %}</td>
+      <td class="num small">{{ d.size|size }}</td></tr>
+    {% else %}<tr><td colspan="5" class="empty">Bu projeye bağlı doküman yok.</td></tr>{% endfor %}</tbody>
   </table></div>
-  <p class="small muted" style="margin-top:10px">PDF, Word, Excel, PowerPoint ve metin dosyalarının içeriği AI değerlendirmesinde kullanılır.</p>
 </div>
 
 {% elif tab == 'aksiyon' %}

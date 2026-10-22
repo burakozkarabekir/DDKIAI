@@ -1,62 +1,180 @@
-"""Yüklenen dokümanlardan düz metin çıkarma (AI analizi ve arama için)."""
+"""Dokümanlardan yapıyı koruyarak metin çıkarma.
+
+Çıktı bölümlerden oluşur: [(başlık, metin)]. Başlık; Word başlık stilleri, slayt numarası, Excel sayfası
+ya da PDF sayfasıdır. Bölümler daha sonra parçalara (chunk) ayrılıp indekslenir.
+"""
 import csv
+import email
 import io
+import re
+import zipfile
+from html import unescape
 from pathlib import Path
 
-ALLOWED_EXT = {".pdf", ".docx", ".xlsx", ".xlsm", ".pptx", ".txt", ".md", ".csv", ".json", ".png", ".jpg", ".jpeg", ".zip", ".msg", ".eml"}
-TEXT_LIMIT = 400_000
+from .storage import LEGACY_EXT, convert_legacy
+
+TEXT_LIMIT = 1_500_000
 
 
-def extract_text(path: Path) -> str:
+def extract(path: Path) -> dict:
+    """Dönüş: {"sections": [(heading, text)], "pages": int|None, "warning": str|None}"""
     ext = path.suffix.lower()
+    warning = None
+    if ext in LEGACY_EXT:
+        converted = convert_legacy(path)
+        if not converted:
+            return {"sections": [], "pages": None,
+                    "warning": f"{ext} formatı için sunucuda LibreOffice yok; dosyayı modern formatta (docx/pptx/xlsx) yükleyin."}
+        path, ext = converted, converted.suffix.lower()
     try:
         if ext == ".pdf":
-            from pypdf import PdfReader
-            reader = PdfReader(str(path))
-            text = "\n".join((p.extract_text() or "") for p in reader.pages)
-        elif ext == ".docx":
-            import docx
-            d = docx.Document(str(path))
-            parts = [p.text for p in d.paragraphs]
-            for table in d.tables:
-                for r in table.rows:
-                    parts.append(" | ".join(c.text.strip() for c in r.cells))
-            text = "\n".join(parts)
-        elif ext in (".xlsx", ".xlsm"):
-            from openpyxl import load_workbook
-            wb = load_workbook(str(path), read_only=True, data_only=True)
-            parts = []
-            for ws in wb.worksheets:
-                parts.append(f"## Sayfa: {ws.title}")
-                for r in ws.iter_rows(values_only=True):
-                    if any(v is not None for v in r):
-                        parts.append(" | ".join("" if v is None else str(v) for v in r))
-            text = "\n".join(parts)
-        elif ext == ".pptx":
-            text = _pptx_text(path)
-        elif ext == ".csv":
-            raw = path.read_text(encoding="utf-8", errors="replace")
-            text = "\n".join(" | ".join(r) for r in csv.reader(io.StringIO(raw)))
-        elif ext in (".txt", ".md", ".json", ".eml"):
-            text = path.read_text(encoding="utf-8", errors="replace")
-        else:
-            text = ""
-    except Exception as exc:  # bozuk / şifreli dosyalar analizi durdurmasın
-        text = f"[Metin çıkarılamadı: {exc}]"
-    return text[:TEXT_LIMIT]
+            sections, pages = _pdf(path)
+            if sum(len(t) for _, t in sections) < 40 * max(1, pages):
+                warning = "PDF'ten neredeyse hiç metin çıkmadı; taranmış (görüntü) bir doküman olabilir. OCR gerekir."
+            return {"sections": sections, "pages": pages, "warning": warning}
+        if ext in (".docx", ".docm"):
+            return {"sections": _docx(path), "pages": None, "warning": None}
+        if ext in (".xlsx", ".xlsm"):
+            return {"sections": _xlsx(path), "pages": None, "warning": None}
+        if ext == ".pptx":
+            secs = _pptx(path)
+            return {"sections": secs, "pages": len(secs), "warning": None}
+        if ext == ".csv":
+            raw = path.read_text(encoding="utf-8-sig", errors="replace")
+            return {"sections": [("Tablo", "\n".join(" | ".join(r) for r in csv.reader(io.StringIO(raw))))], "pages": None, "warning": None}
+        if ext in (".html", ".htm"):
+            return {"sections": [("", _strip_html(path.read_text(encoding="utf-8", errors="replace")))], "pages": None, "warning": None}
+        if ext == ".eml":
+            return {"sections": _eml(path), "pages": None, "warning": None}
+        if ext in (".txt", ".md", ".json"):
+            return {"sections": _plain_sections(path.read_text(encoding="utf-8", errors="replace")), "pages": None, "warning": None}
+        if ext == ".zip":
+            return {"sections": [("Arşiv içeriği", "\n".join(zipfile.ZipFile(path).namelist()))], "pages": None,
+                    "warning": "ZIP içindeki dosyalar ayrı ayrı yüklenmelidir; yalnızca dosya listesi okundu."}
+        return {"sections": [], "pages": None, "warning": "Bu dosya türünden metin çıkarılamaz (görsel vb.). Doküman saklandı."}
+    except Exception as exc:  # bozuk / şifreli dosyalar akışı durdurmasın
+        return {"sections": [], "pages": None, "warning": f"Metin çıkarılamadı: {exc}"}
 
 
-def _pptx_text(path: Path) -> str:
-    import re
-    import zipfile
-    parts = []
+def full_text(sections: list[tuple[str, str]]) -> str:
+    out = []
+    for h, t in sections:
+        out.append((f"## {h}\n" if h else "") + t)
+    return "\n\n".join(out)[:TEXT_LIMIT]
+
+
+# ---------------------------------------------------------------- biçimler
+
+def _pdf(path: Path):
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    sections = [(f"Sayfa {i}", (p.extract_text() or "").strip()) for i, p in enumerate(reader.pages, 1)]
+    return [s for s in sections if s[1]], len(reader.pages)
+
+
+def _docx(path: Path):
+    import docx
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    d = docx.Document(str(path))
+    sections, heading, buf = [], "", []
+
+    def flush():
+        if buf:
+            sections.append((heading, "\n".join(buf).strip()))
+            buf.clear()
+        elif heading:  # içeriksiz başlık (ör. doküman başlığı) kaybolmasın: proje eşleştirmede gerekli
+            sections.append((heading, heading))
+
+    for block in d.element.body.iterchildren():
+        tag = block.tag.rsplit("}", 1)[-1]
+        if tag == "p":
+            p = Paragraph(block, d)
+            text = p.text.strip()
+            style = (p.style.name or "").lower() if p.style is not None else ""
+            if text and (style.startswith("heading") or style.startswith("başlık") or style == "title"):
+                flush()
+                heading = text
+            elif text:
+                buf.append(text)
+        elif tag == "tbl":
+            t = Table(block, d)
+            for r in t.rows:
+                cells = []
+                for c in r.cells:
+                    v = c.text.strip()
+                    if not cells or cells[-1] != v:  # birleştirilmiş hücre tekrarlarını at
+                        cells.append(v)
+                if any(cells):
+                    buf.append(" | ".join(cells))
+    flush()
+    return sections
+
+
+def _xlsx(path: Path):
+    from openpyxl import load_workbook
+    wb = load_workbook(str(path), read_only=True, data_only=True)
+    sections = []
+    for ws in wb.worksheets:
+        lines = []
+        for r in ws.iter_rows(values_only=True):
+            if any(v is not None and str(v).strip() for v in r):
+                lines.append(" | ".join("" if v is None else str(v).strip() for v in r).rstrip(" |"))
+        if lines:
+            sections.append((f"Sayfa: {ws.title}", "\n".join(lines)))
+    return sections
+
+
+def _pptx(path: Path):
+    sections = []
     with zipfile.ZipFile(path) as z:
-        slides = sorted(
-            (n for n in z.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", n)),
-            key=lambda n: int(re.findall(r"\d+", n)[-1]),
-        )
-        for i, name in enumerate(slides, 1):
+        names = z.namelist()
+        slides = sorted((n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n)), key=lambda n: int(re.findall(r"\d+", n)[-1]))
+        for name in slides:
+            num = re.findall(r"\d+", name)[-1]
             xml = z.read(name).decode("utf-8", errors="replace")
-            texts = re.findall(r"<a:t>([^<]*)</a:t>", xml)
-            parts.append(f"## Slayt {i}\n" + " ".join(texts))
-    return "\n".join(parts)
+            paras = [unescape(" ".join(re.findall(r"<a:t>([^<]*)</a:t>", p))) for p in re.findall(r"<a:p>(.*?)</a:p>", xml, re.S)]
+            text = "\n".join(p for p in paras if p.strip())
+            note_name = f"ppt/notesSlides/notesSlide{num}.xml"
+            if note_name in names:
+                notes = " ".join(re.findall(r"<a:t>([^<]*)</a:t>", z.read(note_name).decode("utf-8", errors="replace")))
+                if notes.strip():
+                    text += f"\n[Konuşmacı notu] {unescape(notes)}"
+            title = text.split("\n", 1)[0][:80] if text else ""
+            sections.append((f"Slayt {num}" + (f" · {title}" if title else ""), text))
+    return [s for s in sections if s[1].strip()]
+
+
+def _eml(path: Path):
+    msg = email.message_from_bytes(path.read_bytes())
+    head = f"Konu: {msg.get('Subject', '')}\nKimden: {msg.get('From', '')}\nTarih: {msg.get('Date', '')}"
+    parts = []
+    for part in msg.walk():
+        if part.get_content_type() == "text/plain":
+            parts.append(part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace"))
+        elif part.get_content_type() == "text/html" and not parts:
+            parts.append(_strip_html(part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")))
+    return [("E-posta", head + "\n\n" + "\n".join(parts))]
+
+
+def _strip_html(html: str) -> str:
+    html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    html = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</li>|</tr>", "\n", html)
+    return re.sub(r"[ \t]+", " ", unescape(re.sub(r"<[^>]+>", " ", html))).strip()
+
+
+def _plain_sections(text: str):
+    """Markdown/düz metinde '#' başlıklarına ya da BÜYÜK HARF satırlarına göre böl."""
+    sections, heading, buf = [], "", []
+    for line in text.splitlines():
+        m = re.match(r"^#{1,4}\s+(.+)", line)
+        if m:
+            if buf:
+                sections.append((heading, "\n".join(buf).strip()))
+                buf = []
+            heading = m.group(1).strip()
+        else:
+            buf.append(line)
+    if buf:
+        sections.append((heading, "\n".join(buf).strip()))
+    return [s for s in sections if s[1]]

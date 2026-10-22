@@ -1,62 +1,59 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import health %}
-{% block title %}Haftalık Raporlar{% endblock %}
-{% block crumbs %}DT haftalık durum raporları · {{ reports|length }} rapor{% endblock %}
+{% from "partials/macros.html" import health, upload_form, doc_status %}
+{% block title %}DT Raporları{% endblock %}
+{% block crumbs %}Doğuş Teknoloji durum raporları · {{ reports|length }} rapor{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Haftalık Raporlar</h1>
-<p>Doğuş Teknoloji her hafta durum raporunu buraya yükler. AI raporu okur, projeleri eşleştirir, takılma riskini puanlar ve öneri üretir.
-Dijital Dönüşüm ekibi önerileri onaylayınca portföy güncellenir.</p></div></div>
+<div class="page-head"><div><h1>DT Raporları</h1>
+<p>Doğuş Teknoloji'nin gönderdiği durum raporları ve bizim iç notlarımız birlikte. Her rapor proje bazında ayrıştırılır; sağlık önerileri
+ve risk skorları aşağıdaki ısı haritasında hafta hafta görünür.</p></div></div>
 
 <div class="grid g-main">
   <div class="stack">
-    {% if weeks %}
+    {% if cols %}
     <div class="card">
-      <div class="card-head"><h2>Haftalık sağlık geçmişi</h2><span class="muted small">Hücre = AI'ın o haftaki önerisi · boş = raporda geçmedi</span></div>
+      <div class="card-head"><h2>Rapor bazında sağlık geçmişi</h2><span class="muted small">Hücre = o rapordaki sağlık önerisi · rakam = risk skoru · boş = raporda geçmedi</span></div>
       <div style="overflow-x:auto">
       <table class="heat">
-        <thead><tr><th></th>{% for w in weeks %}<th class="small muted" style="text-align:center"><a href="/raporlar/{{ w.id }}">{{ w.week_start[8:10] }}.{{ w.week_start[5:7] }}</a></th>{% endfor %}</tr></thead>
+        <thead><tr><th></th>{% for r in cols %}<th class="small muted" style="text-align:center"><a href="/dokumanlar/{{ r.id }}" title="{{ r.title }}">{{ (r.doc_date or r.uploaded_at)[8:10] }}.{{ (r.doc_date or r.uploaded_at)[5:7] }}</a></th>{% endfor %}</tr></thead>
         <tbody>{% for p in heat_projects %}<tr>
-          <td class="small nowrap"><span class="code">{{ p.code }}</span> <a href="/projeler/{{ p.id }}?tab=durum">{{ p.name|truncate(30) }}</a></td>
-          {% for w in weeks %}{% set u = grid.get((p.id, w.id)) %}
-          <td>{% if u %}<div class="cell {{ u.suggested_health }}" data-tip="{{ p.code }} · {{ w.week_start }} · {{ D.HEALTH.get(u.suggested_health, ('?',))[0] }}{% if user.role != 'dt' %} · risk {{ u.risk_score }}{% endif %}">{% if user.role != 'dt' %}{{ u.risk_score }}{% endif %}</div>{% else %}<div class="cell none" data-tip="{{ p.code }} raporda yok">–</div>{% endif %}</td>
+          <td class="small nowrap"><span class="code">{{ p.code }}</span> <a href="/projeler/{{ p.id }}?tab=bilgi">{{ p.name|truncate(30) }}</a></td>
+          {% for r in cols %}{% set u = grid.get((p.id, r.id)) %}
+          <td>{% if u %}<div class="cell {{ u.value_text }}" data-tip="{{ p.code }} · {{ r.doc_date }} · {{ D.HEALTH.get(u.value_text, ('?',))[0] }} · risk {{ u.value_num|num }}">{{ u.value_num|num }}</div>{% else %}<div class="cell none" data-tip="{{ p.code }} bu raporda yok">–</div>{% endif %}</td>
           {% endfor %}</tr>{% endfor %}</tbody>
       </table>
       </div>
-      <div class="legend"><span class="health yesil">Yolunda</span><span class="health sari">Dikkat</span><span class="health kirmizi">Riskli</span><span>Rakam = AI risk skoru (0-100)</span></div>
+      <div class="legend"><span class="health yesil">Yolunda</span><span class="health sari">Dikkat</span><span class="health kirmizi">Riskli</span></div>
     </div>
     {% endif %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Hafta</th><th>Rapor</th><th>Yükleyen</th><th>AI analizi</th><th class="num">Proje</th><th class="num">Riskli</th><th>Durum</th></tr></thead>
+        <thead><tr><th>Tarih</th><th>Rapor</th><th class="num">Proje</th><th class="num">Riskli</th><th>Durum</th></tr></thead>
         <tbody>{% for r in reports %}
-        <tr><td class="nowrap">{{ r.week_start|date }}</td><td><a href="/raporlar/{{ r.id }}">{{ r.title }}</a></td><td class="small">{{ r.uname }}</td>
-          <td class="small">{{ {'bekliyor':'Sırada','analiz':'Analiz ediliyor…','tamam':'Tamamlandı','hata':'Hata'}[r.ai_status] }}</td>
-          <td class="num">{{ r.n }}</td><td class="num">{{ r.risky }}</td><td class="small">{{ 'Portföye işlendi' if r.applied else 'Onay bekliyor' if r.ai_status == 'tamam' else '—' }}</td></tr>
-        {% else %}<tr><td colspan="7" class="empty">Henüz rapor yok.</td></tr>{% endfor %}</tbody>
+        <tr><td class="nowrap">{{ (r.doc_date or r.uploaded_at)|date }}</td><td><a href="/dokumanlar/{{ r.id }}">{{ r.title }}</a></td>
+          <td class="num">{{ r.n }}</td><td class="num">{{ r.risky }}</td><td>{{ doc_status(r.status, status_labels) }}</td></tr>
+        {% else %}<tr><td colspan="5" class="empty">Henüz DT raporu yok.</td></tr>{% endfor %}</tbody>
       </table>
     </div>
+    {% if weekly %}
+    <div class="card"><h2>Haftalık AI yorumları</h2>
+      <ul class="list-plain">{% for w in weekly %}<li><a href="/danisman/icgoru/{{ w.id }}">{{ w.title }}</a> <span class="small muted">· {{ w.created_at|ago }}</span></li>{% endfor %}</ul></div>
+    {% endif %}
   </div>
-  <div>
-  {% if user.role in D.CAN_UPLOAD %}
-  <div class="card">
-    <h2>Rapor yükle</h2>
-    <form method="post" action="/raporlar" enctype="multipart/form-data">
-      <div class="field"><label>Hafta başlangıcı (Pazartesi)</label><input type="date" name="week_start" value="{{ monday }}" required></div>
-      <div class="field"><label>Başlık</label><input name="title" placeholder="Boş bırakılırsa otomatik"></div>
-      <div class="field"><label>Rapor dosyası</label><input type="file" name="file"><div class="small muted" style="margin-top:4px">PDF, Word, Excel, PowerPoint, TXT</div></div>
-      <div class="field"><label>…veya rapor metnini yapıştırın</label><textarea name="text" rows="6" placeholder="E-postadaki raporu buraya yapıştırabilirsiniz"></textarea></div>
-      <button class="btn primary" data-busy="Yükleniyor…">Yükle ve analiz et</button>
-    </form>
-  </div>
-  {% endif %}
-  <div class="card" style="margin-top:16px">
-    <h3>DT rapor şablonu önerisi</h3>
-    <p class="small">AI'ın doğru çıkarım yapabilmesi için her proje bölümünde şunlar olmalı:</p>
-    <ol class="small" style="padding-left:18px;margin:0">
-      <li>Proje kodu ve adı (ör. <b>AI-003</b>)</li><li>Bu haftaki ilerleme ve ilerleme %</li><li>Engel / bağımlılık ve <b>sahibi</b></li>
-      <li>Hedef tarihte değişiklik var mı?</li><li>Önümüzdeki hafta planı</li><li>KPI / ölçüm verisi (canlı projeler için)</li>
-    </ol>
-  </div>
+  <div class="stack">
+    <div class="card"><h2>DT raporu yükle</h2>
+      <form method="post" action="/dokumanlar" enctype="multipart/form-data" class="upload">
+        <input type="hidden" name="doc_type" value="dt_durum"><input type="hidden" name="source" value="Doğuş Teknoloji">
+        <label class="drop"><input type="file" name="files" multiple required><span><b>Rapor dosyalarını seçin</b><br><span class="small muted">Word, PDF, PowerPoint, Excel, e-posta</span></span></label>
+        <div class="field" style="margin-top:10px"><label>Rapor tarihi</label><input type="date" name="doc_date" value="{{ today() }}"></div>
+        <button class="btn primary" data-busy="Yükleniyor…">Yükle ve analiz et</button>
+      </form>
+    </div>
+    <div class="card"><h3>Son iç notlarımız</h3>
+      <ul class="list-plain small">{% for n in notes %}<li><a href="/dokumanlar/{{ n.id }}">{{ n.title }}</a> <span class="muted">· {{ (n.doc_date or n.uploaded_at)|date }}</span></li>{% else %}<li class="muted">İç not yok. Dokümanlar sayfasından "İç Notlar" türüyle yükleyin.</li>{% endfor %}</ul></div>
+    <div class="card"><h3>DT rapor şablonu önerisi</h3>
+      <ol class="small" style="padding-left:18px;margin:0">
+        <li>Proje kodu ve adı (ör. <b>AI-003</b>) — her proje ayrı paragraf</li><li>Bu dönemki ilerleme ve ilerleme %</li><li>Engel / bağımlılık ve <b>sahibi</b></li>
+        <li>Hedef tarihte değişiklik (yeni tarih)</li><li>Önümüzdeki dönem planı</li><li>KPI / ölçüm verisi (canlı projeler için)</li></ol></div>
   </div>
 </div>
 {% endblock %}

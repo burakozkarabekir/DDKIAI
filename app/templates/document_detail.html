@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import doc_type, doc_status, health %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block crumbs %}<a href="/dokumanlar">Dokümanlar</a> / D{{ d.id }}{% endblock %}
+{% block topactions %}
+{% if d.storage_path %}<a class="btn" href="/dokumanlar/{{ d.id }}/indir">İndir</a>{% endif %}
+<form method="post" action="/dokumanlar/{{ d.id }}/yeniden-isle"><button class="btn">↻ Yeniden işle</button></form>
+{% if user.role in D.CAN_EDIT %}<form method="post" action="/dokumanlar/{{ d.id }}/sil" data-confirm="Doküman ve ondan çıkarılan tüm bilgiler silinsin mi? (Projelere uygulanmış değerler değişmez.)"><button class="btn ghost danger">Sil</button></form>{% endif %}
+{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <div class="row" style="margin-bottom:6px"><span class="code">D{{ d.id }}</span>{{ doc_type(d.doc_type) }}{{ doc_status(d.status, status_labels) }}
+    {% if d.type_source in ('ai','kural') %}<span class="small muted">tür otomatik belirlendi</span>{% endif %}</div>
+  <h1>{{ d.title }}</h1>
+  <p class="muted small">{{ d.filename }} · {{ d.size|size }}{% if d.page_count %} · {{ d.page_count }} sayfa{% endif %}{% if d.char_count %} · {{ d.char_count|num }} karakter{% endif %} · {{ d.uname or '—' }} yükledi, {{ d.uploaded_at|ago }}{% if d.iname %} · <a href="/guvenlik/{{ d.slug }}">{{ d.iname }}</a>{% endif %}</p>
+</div></div>
+
+{% if d.status in ('sirada', 'isleniyor') %}
+<div class="card" data-poll-docs="{{ d.id }}" style="margin-bottom:16px"><b>Doküman işleniyor…</b> <span class="muted small">Metin çıkarılıyor, projelerle eşleştiriliyor ve bilgiler çıkarılıyor. Sayfa bitince yenilenecek.</span>
+  <ol class="pipeline small"><li>Metin çıkarma</li><li>Parçalama & arama indeksi</li><li>Proje eşleştirme</li><li>AI bilgi çıkarımı</li><li>İnceleme kuyruğu</li></ol></div>
+{% elif d.status == 'hata' %}<div class="flash error"><b>İşleme hatası.</b> {{ d.error|truncate(600) }} — Ayarlar'dan AI bağlantısını kontrol edip yeniden işleyin.</div>
+{% elif d.status == 'metin_yok' %}<div class="flash warn">{{ d.error }}</div>
+{% elif d.error %}<div class="flash warn">{{ d.error }}</div>{% endif %}
+
+<div class="grid g-main">
+  <div class="stack">
+    {% if d.summary %}<div class="card"><h3>Özet</h3><p style="margin:0">{{ d.summary }}</p></div>{% endif %}
+    {% if candidates %}
+    <div class="card"><h3>Portföyde olmayan proje adayları</h3>
+      {% for c in candidates %}<div class="row small" style="margin-bottom:6px"><b>{{ c.value_text }}</b><span class="muted">{{ c.evidence|truncate(120) }}</span><span class="spacer"></span>
+        <a class="btn sm" href="/projeler/yeni?ad={{ c.value_text|urlencode }}&fact={{ c.id }}">Proje oluştur</a></div>{% endfor %}
+    </div>{% endif %}
+    <div class="card">
+      <div class="card-head"><h2>Çıkarılan bilgiler</h2><span class="muted small">{{ grouped.values()|map('length')|sum }} bilgi</span></div>
+      {% for (code, pname), items in grouped.items() if code %}
+      <h3 style="margin-top:14px"><span class="code">{{ code }}</span> {{ pname }}</h3>
+      <form method="post" action="/inceleme">
+      <table class="facts">
+        {% for f in items %}
+        <tr class="st-{{ f.status }}">
+          <td style="width:24px">{% if f.status == 'oneri' %}<input type="checkbox" name="fact_id" value="{{ f.id }}" checked>{% endif %}</td>
+          <td class="small nowrap" style="width:170px"><b>{{ f.label }}</b><div class="muted">{{ f.as_of|date }}{% if f.confidence %} · güven %{{ (f.confidence * 100)|round|int }}{% endif %}</div></td>
+          <td class="small">{% if f.fact_type == 'saglik' %}{{ health(f.value_text) }} <span class="muted">risk {{ f.value_num|num }}</span>{% else %}{{ f.display }}{% endif %}
+            {% if f.status == 'oneri' %}<div class="muted">Şu an: {{ f.current|truncate(100) }}</div>{% endif %}
+            {% if f.evidence and f.fact_type not in ('durum','not') %}<div class="quote">“{{ f.evidence }}”</div>{% endif %}</td>
+          <td class="small nowrap" style="width:96px">{{ {'bilgi':'Bilgi','oneri':'Onay bekliyor','onaylandi':'Uygulandı','reddedildi':'Reddedildi','atlandi':'Başka değer seçildi'}[f.status] }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% if items|selectattr('status','equalto','oneri')|list %}<div class="row" style="margin:6px 0 0"><button class="btn primary sm" name="action" value="onayla">Seçilenleri projeye uygula</button><button class="btn ghost sm" name="action" value="reddet">Reddet</button></div>{% endif %}
+      </form>
+      {% else %}<div class="empty">{{ 'Bilgi çıkarılmadı.' if d.status == 'islendi' else 'İşlem bekleniyor.' }}</div>{% endfor %}
+    </div>
+    <div class="card">
+      <details class="inline"><summary><b>Doküman bölümleri</b> <span class="small muted">({{ chunks|length }} parça · arama ve AI bağlamı için)</span></summary>
+        {% for c in chunks %}<div class="chunk"><div class="small muted">#{{ c.seq + 1 }} {{ c.heading or '' }}{% if c.code %} · <b>{{ c.code }}</b>{% endif %}</div><pre>{{ c.text }}</pre></div>{% endfor %}
+      </details>
+    </div>
+  </div>
+  <div class="stack">
+    <div class="card"><h3>Doküman bilgileri</h3>
+      <form method="post" action="/dokumanlar/{{ d.id }}">
+        <div class="field"><label>Başlık</label><input name="title" value="{{ d.title }}" required></div>
+        <div class="field"><label>Tür</label><select name="doc_type">{% for k, v in D.DOC_TYPES.items() %}<option value="{{ k }}" {{ 'selected' if d.doc_type == k }}>{{ v[0] }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Kaynak</label><select name="source"><option value="">—</option>{% for s in D.DOC_SOURCES %}<option {{ 'selected' if d.source == s }}>{{ s }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Doküman tarihi / dönemi</label><input type="date" name="doc_date" value="{{ d.doc_date or '' }}"></div>
+        <label class="row small" style="font-weight:500"><input type="checkbox" name="reprocess" value="1"> Kaydettikten sonra yeniden işle</label>
+        <button class="btn sm" style="margin-top:8px">Kaydet</button>
+      </form>
+    </div>
+    <div class="card"><h3>Bağlı projeler</h3>
+      <ul class="list-plain small">{% for l in links %}
+        <li class="row"><span class="code">{{ l.code }}</span><a href="/projeler/{{ l.project_id }}?tab=bilgi">{{ l.name|truncate(28) }}</a><span class="spacer"></span>
+          <span class="muted" title="Eşleşme yöntemi">{{ {'manuel':'elle','kod':'kod','isim':'ad','ai':'AI'}[l.method] }}{% if l.mentions %} · {{ l.mentions }}×{% endif %}</span>
+          <form method="post" action="/dokumanlar/{{ d.id }}/bag-kaldir/{{ l.project_id }}" data-confirm="Bağ ve bu projeye dair çıkarılan (onaylanmamış) bilgiler kaldırılsın mı?"><button class="btn ghost sm" title="Kaldır">✕</button></form></li>
+      {% else %}<li class="muted">Henüz proje eşleşmedi.</li>{% endfor %}</ul>
+      <form method="post" action="/dokumanlar/{{ d.id }}/bagla" class="row" style="margin-top:8px">
+        <select name="project_id" style="flex:1">{% for p in projects %}<option value="{{ p.id }}">{{ p.code }} · {{ p.name }}</option>{% endfor %}</select><button class="btn sm">Bağla</button></form>
+    </div>
+    {% if job %}<div class="card small muted">Son işlem: {{ job.status }} · {{ job.finished_at|ago if job.finished_at else '…' }}{% if job.attempts > 1 %} · {{ job.attempts }}. deneme{% endif %}</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

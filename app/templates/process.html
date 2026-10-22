@@ -6,10 +6,10 @@
 <p>Bu sayfa takibin kurallarıdır: bir proje hangi aşamadan nasıl geçer, kim neyi ne zaman yapar, ne zaman eskale edilir. Sistem bu kuralları otomatik kontrol eder.</p></div></div>
 
 <div class="grid g4" style="margin-bottom:16px">
-  {% for t, d in [('Tek gerçek kaynak','Trello, e-posta ve sunumlar yerine her projenin durumu, dokümanı ve kararı burada.'),
+  {% for t, d in [('Tek gerçek kaynak','Trello, e-posta ve sunumlar yerine her projenin durumu, dokümanı ve kararı burada; her bilgi kaynağıyla birlikte.'),
                   ('Ölçülmeyen etki, etki değildir','Canlıya çıkan her projenin baseline\'ı ve ölçüm sahibi olmalı.'),
                   ('Kapıdan geçmeden ilerleme yok','Her aşama geçişinde kriterler kontrol edilir; eksikle geçiş kayda geçer.'),
-                  ('AI önerir, insan karar verir','AI raporları okur ve risk puanlar; portföye işleme kararı DDE ekibindedir.')] %}
+                  ('AI önerir, insan karar verir','AI dokümanları okur, bilgi çıkarır ve risk puanlar; proje kaydını değiştiren her öneri DDE onayından geçer.')] %}
   <div class="card"><h3>{{ t }}</h3><p class="small muted" style="margin:0">{{ d }}</p></div>
   {% endfor %}
 </div>
@@ -36,8 +36,8 @@
   <div class="card">
     <h2>2 · Haftalık ritim</h2>
     <div class="cadence" style="grid-template-columns:1fr">
-      <div class="day"><b>Pazartesi 12:00'ye kadar</b>DT haftalık durum raporunu yükler (dosya ya da metin). Raporda olmayan aktif proje "durum gelmedi" olarak işaretlenir.</div>
-      <div class="day"><b>Pazartesi öğleden sonra</b>AI raporu analiz eder. DDE ekibi önerileri inceler, uygun olanları portföye işler, gerekirse aksiyon açar.</div>
+      <div class="day"><b>Pazartesi 12:00'ye kadar</b>DT durum raporunu DDE'ye iletir; DDE raporu ve haftanın iç notlarını <a href="/dokumanlar">Dokümanlar</a>'a yükler. Raporda olmayan aktif proje "durum gelmedi" olarak işaretlenir.</div>
+      <div class="day"><b>Pazartesi öğleden sonra</b>AI dokümanları işler. DDE <a href="/inceleme">İnceleme Kuyruğu</a>'ndaki önerileri onaylar/reddeder, çelişkileri çözer, gerekirse aksiyon açar.</div>
       <div class="day"><b>Salı</b>DDE – DT haftalık senkron (30 dk): yalnızca sarı/kırmızı projeler ve açık aksiyonlar konuşulur.</div>
       <div class="day"><b>Çarşamba</b>Genel Müdür Yönetici Özeti'ni inceler, yorum/talimatlarını ilgili proje kartına yazar.</div>
       <div class="day"><b>Cuma</b>Aksiyon sahipleri kapanışları sisteme işler; geciken aksiyonlar sonraki haftanın gündemine düşer.</div>
@@ -51,7 +51,7 @@
         <li><b>Aylık · KPI ölçümü:</b> canlı projelerin KPI sahipleri gerçekleşen değerleri girer.</li>
         <li><b>Aylık · AI Security:</b> AI Studio, Shadow AI, DLP ve eğitim metrikleri yüklenir.</li>
         <li><b>Çeyreklik · Etki doğrulama:</b> Finans ile gerçekleşen değer doğrulanır → "Doğrulandı".</li>
-        <li><b>Çeyreklik · Boşluk analizi:</b> AI danışman kurumsal yapıya göre eksik alanları raporlar, komite odak alanlarını seçer.</li>
+        <li><b>Çeyreklik · Boşluk analizi:</b> AI danışman departmanlara ve ağrı noktalarına göre eksik alanları raporlar, komite odak alanlarını seçer.</li>
       </ul>
     </div>
     <div class="card">
@@ -64,7 +64,21 @@
 </div>
 
 <div class="card" style="margin-bottom:16px">
-  <h2>5 · Roller ve sorumluluklar (RACI)</h2>
+  <h2>5 · Doküman ve bilgi akışı</h2>
+  <p class="small">Her doküman aynı hattan geçer; farklı türdeki dokümanlar (DT raporu, iç not, PDD, kazanım…) proje bazında birleşir.</p>
+  <ol class="pipeline">
+    <li><b>Yükleme</b><br><span class="small muted">Dosya içerik özetiyle saklanır; aynı dosya ikinci kez kaydedilmez.</span></li>
+    <li><b>Metin çıkarma</b><br><span class="small muted">Word başlıkları, slaytlar, Excel sayfaları, PDF sayfaları korunur.</span></li>
+    <li><b>Parçalama & indeks</b><br><span class="small muted">Proje sınırlarında bölünür, tam metin aramaya eklenir.</span></li>
+    <li><b>Proje eşleştirme</b><br><span class="small muted">Kod, ad, diğer adlar ve AI ile; çok projeli dokümanlar her projeye bağlanır.</span></li>
+    <li><b>Bilgi çıkarma</b><br><span class="small muted">Durum, risk, engel, karar, tarih, KPI, kazanım, aksiyon — her biri alıntı ve kaynakla.</span></li>
+    <li><b>İnceleme</b><br><span class="small muted">Proje alanını değiştirecek bilgiler onaya düşer; kaynaklar çelişirse işaretlenir.</span></li>
+    <li><b>Sentez</b><br><span class="small muted">AI bir projenin tüm kaynaklarını birlikte yorumlar; danışman kaynak göstererek yanıtlar.</span></li>
+  </ol>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>6 · Roller ve sorumluluklar (RACI)</h2>
   <p class="small muted">R: Yapan · A: Hesap veren · C: Danışılan · I: Bilgilendirilen</p>
   <div class="table-wrap" style="border:0"><table class="raci">
     <thead><tr><th>Faaliyet</th><th>Genel Müdür / Komite</th><th>Dijital Dönüşüm</th><th>İş Birimi Sponsoru</th><th>Doğuş Teknoloji</th><th>Bilgi Güvenliği</th></tr></thead>
@@ -81,7 +95,7 @@
 
 <div class="grid g2">
   <div class="card">
-    <h2>6 · Eskalasyon kuralları</h2>
+    <h2>7 · Eskalasyon kuralları</h2>
     <ul class="small" style="padding-left:18px;margin:0;line-height:1.8">
       <li>2 hafta üst üste <b>Riskli</b> → Genel Müdür gündemine, DT yöneticisiyle karar toplantısı.</li>
       <li>AI risk skoru <b>≥ 60</b> → DDE 48 saat içinde engel sahibiyle görüşür ve aksiyon açar.</li>
@@ -92,16 +106,14 @@
     </ul>
   </div>
   <div class="card">
-    <h2>7 · Erişim modeli</h2>
-    <table style="min-width:0">
-      <tbody>
-      <tr><td><b>{{ D.ROLES['executive'] }}</b></td><td class="small">Her şeyi görür, yorum yapar, AI danışmanı kullanır.</td></tr>
-      <tr><td><b>{{ D.ROLES['dde'] }}</b></td><td class="small">Proje, aşama, KPI, aksiyon ve metrikleri yönetir; AI önerilerini onaylar.</td></tr>
-      <tr><td><b>{{ D.ROLES['dt'] }}</b></td><td class="small">Kendisine açık projeleri görür, rapor/doküman yükler, durum ve KPI günceller, yorum yazar. AI danışman, risk skorları ve AI Security'ye erişmez.</td></tr>
-      <tr><td><b>{{ D.ROLES['viewer'] }}</b></td><td class="small">İş birimi yöneticileri: görüntüler ve yorum yapar.</td></tr>
-      <tr><td><b>{{ D.ROLES['admin'] }}</b></td><td class="small">Kullanıcılar, Trello aktarımı, silme işlemleri.</td></tr>
-      </tbody>
-    </table>
+    <h2>8 · Erişim modeli</h2>
+    <p class="small">Uygulamayı yalnızca <b>Dijital Dönüşüm ekibi</b> kullanır. DT raporları ve diğer dokümanlar ekibe iletilir, ekip yükler.
+      Giriş ekranı şu an kapalıdır; kullanıcı/rol altyapısı hazırdır ve gerektiğinde açılır (Üst Yönetim, Doğuş Teknoloji ve görüntüleyici rolleriyle).</p>
+    <table style="min-width:0"><tbody>
+      <tr><td><b>Dijital Dönüşüm Ekibi</b></td><td class="small">Tüm modüller: doküman yükleme, inceleme, proje yönetimi, AI danışman, ayarlar.</td></tr>
+      <tr><td><b>İleride: Üst Yönetim</b></td><td class="small">Görüntüleme, yorum, AI danışman.</td></tr>
+      <tr><td><b>İleride: Doğuş Teknoloji</b></td><td class="small">Yalnızca kendisine açık projeler; AI risk skorları ve iç notlar kapalı.</td></tr>
+    </tbody></table>
   </div>
 </div>
 {% endblock %}

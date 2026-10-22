@@ -9,6 +9,8 @@
 {%- elif name == 'org' %}<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>
 {%- elif name == 'shield' %}<path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>
 {%- elif name == 'flow' %}<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 6h10M6 8l5 8M18 8l-5 8"/>
+{%- elif name == 'timeline' %}<path d="M3 6h8M7 12h10M5 18h7"/><path d="M3 3v18"/>
+{%- elif name == 'inbox' %}<path d="M4 13l2-8h12l2 8v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 13h5l1 2h4l1-2h5"/>
 {%- elif name == 'cog' %}<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
 {%- endif %}</svg>
 {%- endmacro %}
@@ -52,13 +54,25 @@
 {% endfor %}
 {% endmacro %}
 
-{% macro upload_form(project_id=None, initiative_id=None) %}
-<form method="post" action="/dokuman" enctype="multipart/form-data" class="row" style="align-items:flex-end">
-  {% if project_id %}<input type="hidden" name="project_id" value="{{ project_id }}">{% endif %}
+{% macro upload_form(project_id=None, initiative_id=None, compact=False) %}
+<form method="post" action="/dokumanlar" enctype="multipart/form-data" class="upload {{ 'compact' if compact }}">
+  {% if project_id %}<input type="hidden" name="project_ids" value="{{ project_id }}">{% endif %}
   {% if initiative_id %}<input type="hidden" name="initiative_id" value="{{ initiative_id }}">{% endif %}
-  <div style="flex:2;min-width:180px"><label>Dosya</label><input type="file" name="file" required></div>
-  <div style="flex:2;min-width:160px"><label>Başlık</label><input name="title" placeholder="Boş bırakılırsa dosya adı"></div>
-  <div style="flex:1;min-width:160px"><label>Kategori</label><select name="category">{% for c in D.DOC_CATEGORIES %}<option>{{ c }}</option>{% endfor %}</select></div>
-  <button class="btn primary" data-busy="Yükleniyor…">Yükle</button>
+  <label class="drop"><input type="file" name="files" multiple required>
+    <span><b>Dosya seçin veya sürükleyin</b><br><span class="small muted">Birden çok dosya seçebilirsiniz · Word, PDF, PowerPoint, Excel, e-posta, metin · dosya başına en fazla {{ MAX_UPLOAD_MB }} MB</span></span></label>
+  <div class="row" style="margin-top:10px;align-items:flex-end">
+    <div style="flex:1;min-width:170px"><label>Doküman türü</label><select name="doc_type"><option value="otomatik">Otomatik algıla</option>{% for k, v in D.DOC_TYPES.items() %}<option value="{{ k }}">{{ v[0] }}</option>{% endfor %}</select></div>
+    <div style="flex:1;min-width:150px"><label>Kaynak</label><select name="source"><option value="">—</option>{% for s in D.DOC_SOURCES %}<option>{{ s }}</option>{% endfor %}</select></div>
+    <div style="flex:1;min-width:140px"><label>Doküman tarihi</label><input type="date" name="doc_date"></div>
+    <button class="btn primary" data-busy="Yükleniyor…">Yükle</button>
+  </div>
 </form>
 {% endmacro %}
+
+{% macro doc_type(t) -%}
+<span class="badge doc-{{ t }}">{{ D.DOC_TYPES.get(t, ('?',))[0] }}</span>
+{%- endmacro %}
+
+{% macro doc_status(s, labels) -%}
+<span class="dstatus {{ s }}">{{ labels.get(s, s) }}</span>
+{%- endmacro %}

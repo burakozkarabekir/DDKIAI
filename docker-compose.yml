@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "127.0.0.1:8000:8000"   # önüne kurumsal sertifikalı Nginx/IIS reverse proxy konur
+      - "127.0.0.1:8000:8000"     # önüne kurumsal sertifikalı Nginx/IIS reverse proxy konur
     volumes:
-      - ./data:/data            # veritabanı + yüklenen dokümanlar (yedeklenmeli)
+      - ./data:/data              # veritabanı (app.db) — küçük, sık yedeklenmeli
+      - ./files:/files            # yüklenen dokümanlar — büyür; ayrı disk / NAS paylaşımı bağlanabilir
+      # Örnek NAS: - /mnt/nas/ai-impact:/files

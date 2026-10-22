@@ -5,7 +5,7 @@
 {% block content %}
 <div class="card" style="max-width:980px">
   <h1>{{ i.title }}</h1>
-  <p class="muted small">{{ i.created_at|date }} · {{ i.uname or 'Sistem' }} · {{ ai_label() }}</p>
+  <p class="muted small">{{ i.created_at|date }} · {{ ai_label() }}{% if i.code %} · <a href="/projeler/{{ i.project_id }}?tab=bilgi">{{ i.code }} {{ i.pname }}</a>{% endif %}</p>
   <hr>
   <div class="prose">{{ i.body|md }}</div>
 </div>

@@ -15,8 +15,8 @@
   <div class="card"><h2>Yorumlar & tartışma</h2>{{ comments_block(comments, 'initiative', i.id, user) }}</div>
   <div class="stack">
     <div class="card"><h2>Dokümanlar & kullanım raporları</h2>
-      {% if user.role in D.CAN_UPLOAD %}{{ upload_form(initiative_id=i.id) }}{% endif %}
-      <ul class="list-plain" style="margin-top:8px">{% for d in docs %}<li><a href="/dokuman/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ d.category }} · {{ d.uname }} · {{ d.uploaded_at|date }}</div></li>{% else %}<li class="muted small">Doküman yok.</li>{% endfor %}</ul>
+      {% if user.role in D.CAN_UPLOAD %}{{ upload_form(initiative_id=i.id, compact=True) }}{% endif %}
+      <ul class="list-plain" style="margin-top:8px">{% for d in docs %}<li><a href="/dokumanlar/{{ d.id }}">{{ d.title }}</a><div class="small muted">{{ D.DOC_TYPES[d.doc_type][0] }} · {{ d.uploaded_at|date }}</div></li>{% else %}<li class="muted small">Doküman yok.</li>{% endfor %}</ul>
     </div>
     {% if user.role in D.CAN_EDIT %}
     <div class="card"><h2>Girişimi düzenle</h2>

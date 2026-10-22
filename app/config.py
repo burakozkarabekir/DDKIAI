@@ -1,4 +1,5 @@
 """Uygulama ayarları. Tüm değerler ortam değişkenlerinden (.env) okunur."""
+import json
 import os
 from pathlib import Path
 
@@ -22,25 +23,47 @@ _load_dotenv()
 APP_NAME = os.getenv("APP_NAME", "AI Impact Merkezi")
 ORG_NAME = os.getenv("ORG_NAME", "Doğuş Otomotiv · Dijital Dönüşüm")
 SECRET_KEY = os.getenv("SECRET_KEY", "degistir-beni-uretimde")
-DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
-DB_PATH = DATA_DIR / "app.db"
-UPLOAD_DIR = DATA_DIR / "uploads"
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 SEED_DEMO = os.getenv("SEED_DEMO", "1") == "1"
 SESSION_HOURS = int(os.getenv("SESSION_HOURS", "12"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
 
+# Giriş ekranı. 0 iken herkes doğrudan "Dijital Dönüşüm Ekibi" kullanıcısıyla girer.
+# Kullanıcı/rol altyapısı yerinde durur; AUTH_ENABLED=1 yapılınca giriş ekranı geri gelir.
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "0") == "1"
+
+# --- Depolama ---
+# DATA_DIR: veritabanı (app.db) ve iş dosyaları.
+# STORAGE_DIR: yüklenen dokümanların kendisi. Ayrı bir diske / NAS paylaşımına bağlanabilir.
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
+DB_PATH = DATA_DIR / "app.db"
+STORAGE_DIR = Path(os.getenv("STORAGE_DIR", DATA_DIR / "files"))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))
+# Eski Office formatlarını (.doc .ppt .xls .rtf .odt) dönüştürmek için LibreOffice yolu (boşsa otomatik aranır)
+SOFFICE_PATH = os.getenv("SOFFICE_PATH", "")
+
 # --- Şirket içi AI uç noktası ---
-# AI_PROVIDER: "openai" (OpenAI uyumlu /chat/completions — vLLM, LiteLLM, Ollama, OpenAI vb.),
+# AI_PROVIDER: "openai" (OpenAI uyumlu /chat/completions — vLLM, LiteLLM, Ollama, kurumsal gateway),
 #              "azure" (Azure OpenAI), "anthropic" (Messages API) veya "mock" (demo modu)
 AI_PROVIDER = os.getenv("AI_PROVIDER", "mock").lower()
 AI_BASE_URL = os.getenv("AI_BASE_URL", "").rstrip("/")
 AI_API_KEY = os.getenv("AI_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "")
 AI_AZURE_API_VERSION = os.getenv("AI_AZURE_API_VERSION", "2024-10-21")
-AI_TIMEOUT = float(os.getenv("AI_TIMEOUT", "120"))
+# Anahtarın gönderileceği başlık. Boşsa sağlayıcının varsayılanı (Authorization: Bearer / api-key / x-api-key).
+# Örn. API Management arkasındaysa: AI_AUTH_HEADER=Ocp-Apim-Subscription-Key
+AI_AUTH_HEADER = os.getenv("AI_AUTH_HEADER", "")
+try:
+    AI_EXTRA_HEADERS = json.loads(os.getenv("AI_EXTRA_HEADERS", "") or "{}")
+except json.JSONDecodeError:
+    AI_EXTRA_HEADERS = {}
+AI_TIMEOUT = float(os.getenv("AI_TIMEOUT", "180"))
 AI_VERIFY_TLS = os.getenv("AI_VERIFY_TLS", "1") == "1"
+AI_CA_BUNDLE = os.getenv("AI_CA_BUNDLE", "")
+AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.2"))
+AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "4000"))
+# Tek AI çağrısına gönderilecek en fazla metin (karakter). Modelin bağlam penceresine göre ayarlayın
+# (yaklaşık 1 token ≈ 3-4 karakter Türkçe). Büyük dokümanlar bu boyutta parçalara bölünür.
 AI_MAX_CONTEXT_CHARS = int(os.getenv("AI_MAX_CONTEXT_CHARS", "60000"))
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)

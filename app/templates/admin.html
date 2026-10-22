@@ -2,7 +2,9 @@
 {% block title %}Yönetim{% endblock %}
 {% block crumbs %}Kullanıcılar, Trello aktarımı ve işlem kaydı{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Yönetim</h1></div></div>
+<div class="page-head"><div><h1>Yönetim</h1>
+{% if not AUTH_ENABLED %}<p><b>Giriş ekranı kapalı</b> (<code>AUTH_ENABLED=0</code>): herkes "Dijital Dönüşüm Ekibi" ortak hesabıyla çalışır. Kullanıcılar ve roller korunur;
+<code>.env</code> dosyasında <code>AUTH_ENABLED=1</code> yapıp yeniden başlatınca giriş ekranı ve rol bazlı yetkiler devreye girer.</p>{% endif %}</div></div>
 {% if preview %}
 <div class="card" style="margin-bottom:16px">
   <h2>Trello aktarım önizlemesi · {{ preview.board }}</h2>

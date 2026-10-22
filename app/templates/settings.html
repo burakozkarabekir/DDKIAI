@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Ayarlar{% endblock %}
+{% block crumbs %}Departmanlar · AI bağlantısı · Depolama · İş kuyruğu{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Ayarlar</h1></div></div>
+
+<div class="grid g-main">
+  <div class="card" id="departmanlar">
+    <div class="card-head"><h2>Departmanlar</h2><span class="muted small">Projeler departmanlara atanır; kapsama haritası ve boşluk analizi bu listeye göre yapılır.</span></div>
+    <table>
+      <thead><tr><th>Sıra</th><th>Departman</th><th>Açıklama / ağrı noktaları</th><th class="num">Proje</th><th></th></tr></thead>
+      <tbody>{% for d in deps %}
+      <tr style="{{ 'opacity:.5' if not d.active }}">
+        <td class="small">{{ d.sort }}</td>
+        <td><b>{{ d.name }}</b>{% if not d.active %} <span class="badge">pasif</span>{% endif %}</td>
+        <td class="small">{{ d.description or '' }}{% if d.pain_points %}<div class="muted">Ağrı noktaları: {{ d.pain_points }}</div>{% endif %}</td>
+        <td class="num">{{ d.n }}</td>
+        <td class="nowrap">
+          <details class="inline"><summary class="btn sm">Düzenle</summary>
+            <form method="post" action="/ayarlar/departman" style="margin-top:8px;min-width:280px">
+              <input type="hidden" name="dep_id" value="{{ d.id }}">
+              <div class="field"><label>Ad</label><input name="name" value="{{ d.name }}" required></div>
+              <div class="field"><label>Açıklama</label><input name="description" value="{{ d.description or '' }}"></div>
+              <div class="field"><label>Ağrı noktaları / fırsatlar</label><textarea name="pain_points" rows="2">{{ d.pain_points or '' }}</textarea></div>
+              <div class="row"><div style="width:90px"><label>Sıra</label><input name="sort" value="{{ d.sort }}"></div>
+                <label class="row" style="margin-top:20px"><input type="checkbox" name="active" value="1" {{ 'checked' if d.active }}> Aktif</label></div>
+              <div class="row" style="margin-top:8px"><button class="btn primary sm">Kaydet</button></div>
+            </form>
+            <form method="post" action="/ayarlar/departman/{{ d.id }}/sil" data-confirm="{{ d.name }} silinsin mi?{{ ' ' ~ d.n ~ ' projenin departmanı boşalacak.' if d.n }}" style="margin-top:6px"><button class="btn ghost sm danger">Sil</button></form>
+          </details>
+        </td>
+      </tr>{% endfor %}</tbody>
+    </table>
+    <hr>
+    <h3>Departman ekle</h3>
+    <form method="post" action="/ayarlar/departman" class="form-grid">
+      <div class="field"><label>Ad</label><input name="name" required></div>
+      <div class="field span2"><label>Açıklama</label><input name="description"></div>
+      <div class="field span2"><label>Ağrı noktaları / fırsatlar</label><input name="pain_points"></div>
+      <div class="field"><label>Sıra</label><input name="sort" value="{{ deps|length }}"></div>
+      <div class="field"><button class="btn primary">Ekle</button></div>
+    </form>
+  </div>
+
+  <div class="stack">
+    <div class="card" id="ai">
+      <h2>AI bağlantısı</h2>
+      <p class="small">Durum: <b>{{ ai_label() }}</b></p>
+      <table class="small kv">
+        <tr><td class="muted">AI_PROVIDER</td><td><code>{{ ai_cfg.provider }}</code></td></tr>
+        <tr><td class="muted">AI_BASE_URL</td><td><code>{{ ai_cfg.base_url }}</code></td></tr>
+        <tr><td class="muted">AI_MODEL</td><td><code>{{ ai_cfg.model }}</code></td></tr>
+        <tr><td class="muted">AI_API_KEY</td><td><code>{{ ai_cfg.key }}</code></td></tr>
+        <tr><td class="muted">AI_AUTH_HEADER</td><td><code>{{ ai_cfg.auth_header }}</code></td></tr>
+        <tr><td class="muted">Bağlam / zaman aşımı</td><td>{{ ai_cfg.context|num }} karakter · {{ ai_cfg.timeout|int }} sn</td></tr>
+      </table>
+      <form method="post" action="/ayarlar/ai-test" style="margin-top:10px"><button class="btn primary sm" data-busy="Test ediliyor…">Bağlantıyı test et</button></form>
+      {% if test %}<div class="flash {{ 'ok' if test.ok else 'error' }}" style="margin:10px 0 0">{{ test.message }}</div>{% endif %}
+      <p class="small muted" style="margin:10px 0 0">Değerler sunucudaki <code>.env</code> dosyasından okunur. Değiştirdikten sonra uygulamayı yeniden başlatın
+        (<code>docker compose up -d</code>). Ayrıntı: README › "Şirket içi AI bağlantısı".</p>
+    </div>
+    <div class="card" id="depolama">
+      <h2>Doküman deposu</h2>
+      <table class="small kv">
+        <tr><td class="muted">Klasör (STORAGE_DIR)</td><td><code style="word-break:break-all">{{ usage.path }}</code></td></tr>
+        <tr><td class="muted">Doküman</td><td>{{ docs.n }} adet · {{ docs.size|size }}</td></tr>
+        <tr><td class="muted">Diskte kullanılan</td><td>{{ usage.used|size }}</td></tr>
+        <tr><td class="muted">Boş alan</td><td>{{ usage.free|size }} / {{ usage.total|size }}</td></tr>
+        <tr><td class="muted">Eski Office (.doc/.ppt/.xls)</td><td>{{ 'LibreOffice var, dönüştürülür' if soffice else 'LibreOffice yok — modern formatta yükleyin' }}</td></tr>
+        {% if docs.notext %}<tr><td class="muted">Metin çıkmayan</td><td>{{ docs.notext }} doküman (taranmış PDF / görsel olabilir)</td></tr>{% endif %}
+      </table>
+    </div>
+    <div class="card" id="kuyruk">
+      <h2>İşleme kuyruğu</h2>
+      <p class="small">Bekleyen: <b>{{ queue.waiting }}</b> · çalışan: <b>{{ queue.running }}</b> · hatalı: <b>{{ queue.failed }}</b></p>
+      {% for j in failed_jobs %}<div class="small row" style="margin-bottom:6px"><span class="code">{{ j.kind }} #{{ j.ref_id or '' }}</span><span class="muted">{{ j.error|truncate(90) }}</span><span class="spacer"></span>
+        <form method="post" action="/ayarlar/is/{{ j.id }}/tekrar"><button class="btn sm">Tekrar dene</button></form></div>{% endfor %}
+      {% if user.role == 'admin' %}<form method="post" action="/ayarlar/yeniden-isle" data-confirm="Tüm dokümanlar yeniden işlenecek (AI bağlantısı kurulduktan sonra önerilir). Onaylanmış bilgiler korunur. Devam?">
+        <button class="btn sm">Tüm dokümanları yeniden işle</button></form>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

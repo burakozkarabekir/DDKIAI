@@ -216,7 +216,7 @@ details.inline > summary::-webkit-details-marker { display: none; }
 
 /* ---------- kapsama ısı haritası */
 .coverage { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.cov { border-radius: 8px; padding: 10px; font-size: 12px; border: 1px solid var(--border); min-height: 74px; }
+.cov { display: block; color: var(--ink-2); text-decoration: none; border-radius: 8px; padding: 10px; font-size: 12px; border: 1px solid var(--border); min-height: 74px; }
 .cov b { display: block; font-size: 12.5px; margin-bottom: 4px; color: var(--ink); }
 .cov.bos { background: var(--critical-soft); border-color: transparent; }
 .cov.kismen { background: var(--warning-soft); border-color: transparent; }
@@ -306,6 +306,73 @@ details.inline > summary::-webkit-details-marker { display: none; }
 .cadence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .cadence .day { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface-2); }
 .cadence .day b { display: block; color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+
+/* ---------- v2: doküman bilgi katmanı */
+.nav-badge { margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--warning); color: #3d2a00; }
+.nav-badge.busy { background: rgba(255,255,255,.18); color: #fff; }
+.mini { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); }
+.mini .label { display: block; font-size: 11.5px; color: var(--muted); }
+.mini b { display: block; font-size: 22px; font-weight: 650; }
+.mini .sub { font-size: 11.5px; color: var(--ink-2); }
+.drop { display: flex; align-items: center; gap: 14px; border: 2px dashed var(--border-strong); border-radius: 10px; padding: 16px; cursor: pointer; background: var(--surface-2); margin: 0; font-weight: 500; color: var(--ink); }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop input[type=file] { width: auto; max-width: 46%; border: 0; padding: 0; background: none; }
+.upload.compact .drop { padding: 10px; }
+.dstatus { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.dstatus::before { content: "● "; }
+.dstatus.islendi { color: var(--good-ink); } .dstatus.sirada, .dstatus.isleniyor { color: var(--accent); }
+.dstatus.hata { color: var(--critical-ink); } .dstatus.metin_yok { color: var(--warning-ink); }
+.badge.doc-dt_durum { background: #e6effc; color: #1c5cab; border-color: transparent; }
+.badge.doc-ic_not, .badge.doc-toplanti { background: #f1ecfd; color: #5b45c9; border-color: transparent; }
+.badge.doc-pdd, .badge.doc-business_case { background: #e5f6ef; color: #0e7a53; border-color: transparent; }
+.badge.doc-kazanim { background: #fff2da; color: #8a5a00; border-color: transparent; }
+:root[data-theme="dark"] .badge[class*="doc-"] { background: var(--surface-2); color: var(--ink-2); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge[class*="doc-"] { background: var(--surface-2); color: var(--ink-2); } }
+.cite { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; text-decoration: none; }
+.cite:hover { text-decoration: none; filter: brightness(.95); }
+.pend { color: var(--warning-ink); font-weight: 600; font-size: 11.5px; }
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { padding: 9px 0 9px 12px; border-bottom: 1px solid var(--border); border-left: 3px solid var(--border); margin-left: 2px; }
+.feed li.ft-risk, .feed li.ft-engel { border-left-color: var(--warning); }
+.feed li.ft-saglik { border-left-color: var(--accent); }
+.feed li.ft-karar { border-left-color: #6250d6; }
+.suggest { display: grid; grid-template-columns: 18px 1fr; gap: 8px; font-weight: 400; color: var(--ink); padding: 8px 0; border-bottom: 1px solid var(--border); margin: 0; }
+table.facts td { vertical-align: top; }
+table.facts tr.st-reddedildi, table.facts tr.st-atlandi { opacity: .5; }
+table.facts tr.st-oneri td { background: var(--warning-soft); }
+.quote { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--border-strong); color: var(--muted); font-style: italic; }
+.snip { color: var(--ink-2); margin-top: 2px; }
+.chunk { border-top: 1px solid var(--border); padding: 8px 0; }
+.chunk pre { white-space: pre-wrap; font: 12.5px/1.45 var(--font); margin: 4px 0 0; color: var(--ink-2); }
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; padding: 0; margin: 12px 0 0; list-style: none; counter-reset: step; }
+.pipeline li { counter-increment: step; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 13px; }
+.pipeline li::before { content: counter(step); display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; margin-right: 6px; }
+table.kv td { padding: 5px 8px; }
+
+/* ---------- zaman çizelgesi */
+.gantt-wrap { overflow-x: auto; }
+.gantt { min-width: 900px; }
+.gantt .grid-q { stroke: var(--axis); stroke-width: 1; }
+.gantt .group { fill: var(--ink); font-size: 12px; font-weight: 700; font-family: var(--font); }
+.gantt .label { fill: var(--ink-2); font-size: 11.5px; font-family: var(--font); }
+.gantt .label .code { fill: var(--muted); font-family: ui-monospace, monospace; font-size: 10.5px; }
+.gantt a:hover .label { fill: var(--accent); }
+.gantt .bar.done, .chart .bar.s1 { fill: var(--s1); }
+.gantt .bar.active { fill: var(--seq-250); }
+.gantt .bar.plan { fill: none; stroke: var(--seq-350); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.gantt .bar.late { fill: var(--critical); }
+.gantt .bar.paused { fill: var(--axis); }
+.gantt .target { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.5; }
+.gantt .target.late { stroke: var(--critical); }
+.gantt .golive { fill: var(--s1); stroke: var(--surface); stroke-width: 2; }
+.gantt .today { stroke: var(--critical); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.gantt .today-label { fill: var(--critical-ink); font-size: 10.5px; font-weight: 700; font-family: var(--font); }
+.gantt .health-dot.yesil { fill: var(--good); } .gantt .health-dot.sari { fill: var(--warning); } .gantt .health-dot.kirmizi { fill: var(--critical); }
+.gantt .hit:hover rect[fill=transparent] { fill: var(--accent-soft); fill-opacity: .5; }
+.chart .bar.s2 { fill: var(--s2); }
+.legend .lg { width: 18px; height: 9px; }
+.legend .lg.done { background: var(--s1); } .legend .lg.active { background: var(--seq-250); }
+.legend .lg.plan { border: 1.5px dashed var(--seq-350); background: none; } .legend .lg.late { background: var(--critical); height: 4px; vertical-align: 2px; }
 
 @media (max-width: 1180px) {
   .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

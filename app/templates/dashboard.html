@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% from "partials/macros.html" import health, stage, risk %}
 {% block title %}Yönetici Özeti{% endblock %}
-{% block crumbs %}{{ today()|date }}{% if latest_report %} · Son DT raporu: <a href="/raporlar/{{ latest_report.id }}">{{ latest_report.week_start|date }} haftası</a>{% endif %}{% endblock %}
+{% block crumbs %}{{ today()|date }}{% if nav.pending %} · <a href="/inceleme">{{ nav.pending }} öneri onay bekliyor</a>{% endif %}{% endblock %}
 {% block topactions %}
 <a class="btn" href="/disa-aktar/projeler.csv">Excel'e aktar</a>
-<a class="btn" href="/raporlar">Haftalık rapor yükle</a>
+<a class="btn" href="/dokumanlar">Doküman yükle</a>
 <a class="btn primary" href="/danisman">AI Danışmana sor</a>
 {% endblock %}
 {% block content %}
@@ -27,6 +27,19 @@
     <div class="meter"><span style="width:{{ [realized_pct, 100]|min }}%"></span></div></div>
   <div class="card stat"><div class="label">Dikkat gerektiren</div><div class="value">{{ risky_n }}</div>
     <div class="sub"><span class="health kirmizi">{{ health_counts['kirmizi'] }} riskli</span> &nbsp; <span class="health sari">{{ health_counts['sari'] }} dikkat</span></div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-head"><h2>Zaman çizelgesi</h2><a class="small" href="/zaman-cizelgesi">Gantt görünümü →</a></div>
+  <div class="grid g-main" style="align-items:center">
+    <div>{{ tl_bars }}<div class="legend"><span><i style="background:var(--s1)"></i>Başlayan</span><span><i style="background:var(--s2)"></i>Tamamlanan (canlıya geçen)</span><span class="muted">Son 6 çeyrek</span></div></div>
+    <div class="grid g2" style="gap:10px">
+      <div class="mini"><span class="label">Tamamlanan</span><b>{{ tl_summary.done }}</b><span class="sub">bu yıl {{ tl_summary.done_this_year }}</span></div>
+      <div class="mini"><span class="label">Devam eden</span><b>{{ tl_summary.ongoing }}</b><span class="sub">{{ tl_summary.pipeline }} proje havuzda</span></div>
+      <div class="mini"><span class="label">Hedefi geçmiş</span><b class="{{ 'risk hi' if tl_summary.overdue }}">{{ tl_summary.overdue }}</b><span class="sub">canlıya çıkmadı</span></div>
+      <div class="mini"><span class="label">Ort. canlıya çıkış</span><b>{{ (tl_summary.avg_days ~ ' gün') if tl_summary.avg_days else '—' }}</b><span class="sub">90 gün içinde {{ tl_summary.due_90 }} hedef</span></div>
+    </div>
+  </div>
 </div>
 
 <div class="grid g-main" style="margin-top:16px">
@@ -63,12 +76,12 @@
 
 <div class="grid g-main" style="margin-top:16px">
   <div class="card">
-    <div class="card-head"><h2>Takılan ya da takılabilecek projeler</h2><span class="muted small">AI risk skoru = DT raporu + geçmiş trend</span></div>
+    <div class="card-head"><h2>Takılan ya da takılabilecek projeler</h2><span class="muted small">AI risk skoru = dokümanlar + geçmiş trend</span></div>
     {% if risky %}
     <ul class="list-plain">
       {% for p in risky %}
       <li>
-        <div class="row"><span class="code">{{ p.code }}</span><a href="/projeler/{{ p.id }}"><b>{{ p.name }}</b></a>{{ stage(p.stage) }}<span class="spacer"></span>{{ health(p.health) }}<span class="small muted">Risk</span>{{ risk(p.ai_risk_score) }}</div>
+        <div class="row"><span class="code">{{ p.code }}</span><a href="/projeler/{{ p.id }}?tab=bilgi"><b>{{ p.name }}</b></a>{{ stage(p.stage) }}<span class="spacer"></span>{{ health(p.health) }}<span class="small muted">Risk</span>{{ risk(p.ai_risk_score) }}</div>
         {% if p.ai_risk_note %}<div class="small muted" style="margin-top:4px">{{ p.ai_risk_note|truncate(230) }}</div>{% endif %}
       </li>
       {% endfor %}
@@ -78,8 +91,8 @@
   <div class="card">
     <div class="card-head"><h2>Bu haftanın AI yorumu</h2>{% if latest_insight %}<span class="muted small">{{ latest_insight.created_at|ago }}</span>{% endif %}</div>
     {% if latest_insight %}<div class="prose">{{ latest_insight.body|md }}</div>
-    {% if latest_report %}<a class="btn sm" href="/raporlar/{{ latest_report.id }}" style="margin-top:8px">Rapor analizini aç</a>{% endif %}
-    {% else %}<div class="empty">Henüz analiz edilmiş rapor yok.</div>{% endif %}
+    <a class="btn sm" href="/raporlar" style="margin-top:8px">DT raporlarına git</a>
+    {% else %}<div class="empty">Henüz analiz edilmiş rapor yok. <a href="/dokumanlar">DT raporu yükleyin.</a></div>{% endif %}
   </div>
 </div>
 
@@ -88,7 +101,7 @@
     <div class="card-head"><h3>Canlıda ama ölçülmüyor</h3><span class="badge">{{ unmeasured_live|length }}</span></div>
     <ul class="list-plain">{% for p in unmeasured_live %}
       <li class="row"><span class="code">{{ p.code }}</span><a href="/projeler/{{ p.id }}?tab=etki">{{ p.name }}</a><span class="spacer"></span><span class="small muted">{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</span></li>
-    {% else %}<li class="muted">Tüm canlı projeler ölçülüyor. 👏</li>{% endfor %}</ul>
+    {% else %}<li class="muted">Tüm canlı projeler ölçülüyor.</li>{% endfor %}</ul>
   </div>
   <div class="card">
     <div class="card-head"><h3>14 gündür durum gelmeyenler</h3><span class="badge">{{ stale|length }}</span></div>
@@ -107,21 +120,36 @@
 
 <div class="grid g-main" style="margin-top:16px">
   <div class="card">
-    <div class="card-head"><h2>Değer zinciri kapsaması</h2><a class="small" href="/danisman">Boşluk analizi →</a></div>
+    <div class="card-head"><h2>Departman kapsaması</h2><a class="small" href="/danisman">Boşluk analizi →</a></div>
     <div class="coverage">
       {% for c in coverage %}
-      <div class="cov {{ c.level|replace('ş','s')|replace('ı','i') }}"><b>{{ c.area }}</b>
-        {% if c.projects %}{{ c.projects|length }} proje · {{ c.live }} canlı{% else %}<span class="muted">Proje yok</span>{% endif %}</div>
+      <a class="cov {{ c.level|replace('ş','s')|replace('ı','i') }}" href="/projeler?view=liste&departman={{ c.id }}"><b>{{ c.area }}</b>
+        {% if c.projects %}{{ c.projects|length }} proje · {{ c.live }} canlı{% else %}<span class="muted">Proje yok</span>{% endif %}</a>
       {% endfor %}
     </div>
-    <div class="legend"><span><i style="background:var(--good)"></i>Canlı proje var</span><span><i style="background:var(--warning)"></i>Sadece geliştirme/plan</span><span><i style="background:var(--critical)"></i>Boş alan</span></div>
+    <div class="legend"><span><i style="background:var(--good)"></i>Canlı proje var</span><span><i style="background:var(--warning)"></i>Sadece geliştirme/plan</span><span><i style="background:var(--critical)"></i>Boş alan</span><a class="small" href="/ayarlar#departmanlar">Departmanları düzenle</a></div>
   </div>
-  <div class="card">
-    <div class="card-head"><h2>Son yorumlar</h2></div>
-    <ul class="list-plain">{% for c in recent_comments %}
-      <li><div class="small"><b>{{ c.uname }}</b> <span class="muted">· {{ c.organization }} · {{ c.created_at|ago }}</span></div>
-        <div class="small"><a href="{{ c.link }}">{{ c.target_name }}</a>: {{ c.body|striptags|truncate(120) }}</div></li>
-    {% else %}<li class="muted">Yorum yok.</li>{% endfor %}</ul>
+  <div class="stack">
+    <div class="card">
+      <div class="card-head"><h3>Kaynaklar arası çelişkiler</h3><span class="badge">{{ conflicts|length }}</span></div>
+      <ul class="list-plain">{% for c in conflicts[:5] %}
+        <li><div class="row"><span class="code">{{ c.code }}</span><a href="/projeler/{{ c.project_id }}?tab=bilgi">{{ c.label }}</a></div>
+          <div class="small muted">{% for f in c.facts[:3] %}{{ f.display }} <a class="cite" href="/dokumanlar/{{ f.document_id }}">D{{ f.document_id }}</a>{{ ' · ' if not loop.last }}{% endfor %}</div></li>
+      {% else %}<li class="muted small">DT raporları, iç notlar ve PDD'ler arasında çelişki yok.</li>{% endfor %}</ul>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Son dokümanlar</h3><a class="small" href="/dokumanlar">Tümü →</a></div>
+      <ul class="list-plain">{% for d in latest_docs %}
+        <li class="row"><a href="/dokumanlar/{{ d.id }}">{{ d.title|truncate(40) }}</a><span class="spacer"></span><span class="small muted">{{ D.DOC_TYPES[d.doc_type][0] }}</span></li>
+      {% else %}<li class="muted small">Doküman yok.</li>{% endfor %}</ul>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Son yorumlar</h3></div>
+      <ul class="list-plain">{% for c in recent_comments %}
+        <li><div class="small"><b>{{ c.uname }}</b> <span class="muted">· {{ c.created_at|ago }}</span></div>
+          <div class="small"><a href="{{ c.link }}">{{ c.target_name }}</a>: {{ c.body|striptags|truncate(110) }}</div></li>
+      {% else %}<li class="muted small">Yorum yok.</li>{% endfor %}</ul>
+    </div>
   </div>
 </div>
 {% endblock %}

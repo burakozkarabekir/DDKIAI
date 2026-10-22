@@ -1,15 +1,19 @@
 """Demo verisi. SEED_DEMO=1 ve veritabanı boşsa ilk açılışta yüklenir.
 
-Gerçek verilere geçmeden önce `data/app.db` silinip SEED_DEMO=0 ile başlatılmalıdır
-(yalnızca admin kullanıcısı oluşturulur).
+Demo dokümanları gerçek dosya formatlarında (Word, Excel, metin) üretilip uygulamanın doküman işleme
+hattından geçirilir; böylece bilgi çıkarımı, proje eşleştirme, çelişki tespiti ve inceleme kuyruğu
+demo verisinde de gerçek akışla çalışır.
+
+Gerçek verilere geçmeden önce `data/` klasörü silinip SEED_DEMO=0 ile başlatılmalıdır.
 """
+import io
 import os
 from datetime import date, datetime, timedelta
 
-from . import ai, db, security
-from .config import UPLOAD_DIR
-from .reports import store_report_analysis
-from .auth import hash_password
+from . import db, knowledge, pipeline, security
+from .auth import TEAM_EMAIL, hash_password
+from .domain import DEFAULT_DEPARTMENTS
+from .storage import save_stream
 
 
 def _d(days: int) -> str:
@@ -20,14 +24,39 @@ def _ts(days: int) -> str:
     return (datetime.now() + timedelta(days=days)).isoformat(timespec="seconds")
 
 
-def ensure_admin() -> None:
-    if db.scalar("SELECT COUNT(*) FROM users"):
-        return
-    email = os.getenv("ADMIN_EMAIL", "admin@demo.local")
-    password = os.getenv("ADMIN_PASSWORD", "Admin123!")
-    db.insert("users", {"email": email, "name": "Sistem Yöneticisi", "role": "admin", "title": "Admin",
-                        "password_hash": hash_password(password), "created_at": db.now()})
+def ensure_users() -> None:
+    """Ortak ekip kullanıcısı (giriş kapalıyken kullanılır) ve ilk yönetici."""
+    if not db.scalar("SELECT 1 FROM users WHERE email = ?", (TEAM_EMAIL,)):
+        db.insert("users", {"email": TEAM_EMAIL, "name": "Dijital Dönüşüm Ekibi", "role": "admin", "title": "Ortak hesap",
+                            "password_hash": hash_password(os.urandom(16).hex()), "created_at": db.now()})
+    if not db.scalar("SELECT 1 FROM users WHERE role = 'admin' AND email != ?", (TEAM_EMAIL,)):
+        db.insert("users", {"email": os.getenv("ADMIN_EMAIL", "admin@demo.local"), "name": "Sistem Yöneticisi", "role": "admin",
+                            "title": "Admin", "password_hash": hash_password(os.getenv("ADMIN_PASSWORD", "Admin123!")),
+                            "created_at": db.now()})
 
+
+def ensure_departments() -> None:
+    if db.scalar("SELECT COUNT(*) FROM departments"):
+        return
+    for i, (name, desc) in enumerate(DEFAULT_DEPARTMENTS):
+        db.insert("departments", {"name": name, "description": desc, "sort": i, "active": 1})
+
+
+VC_TO_DEPT = {
+    "Satış & Bayi Yönetimi": "Satış", "Satış Sonrası & Servis": "Satış Sonrası Hizmetler",
+    "Yedek Parça & Lojistik": "Yedek Parça & Lojistik", "Müşteri Deneyimi & CRM": "Müşteri Deneyimi & CRM",
+    "Pazarlama": "Pazarlama", "Finans & Muhasebe": "Finans", "İnsan Kaynakları": "İnsan Kaynakları",
+    "Tedarik Zinciri & Satın Alma": "Satın Alma", "Filo & Kiralama": "Filo Kiralama",
+    "Kurumsal Hizmetler & Hukuk": "Hukuk & Uyum", "BT & Siber Güvenlik": "Bilgi Teknolojileri & Güvenlik",
+}
+PAIN_POINTS = {
+    "Satış": "Lead takibi dağınık, bayi performans raporları manuel hazırlanıyor.",
+    "Satış Sonrası Hizmetler": "Garanti reddi kayıpları, teknik bilgiye erişim süresi.",
+    "Yedek Parça & Lojistik": "Acil sipariş maliyeti, stok fazlası, bayi bazlı talep oynaklığı.",
+    "Müşteri Deneyimi & CRM": "Yüksek çağrı hacmi, şikâyet kök neden analizi yapılamıyor.",
+    "Finans": "Manuel mutabakat, ay sonu kapanış süresi.",
+    "Filo Kiralama": "Araç iade hasar süreçleri, kalan değer tahmini.",
+}
 
 USERS = [
     ("gm@demo.local", "Genel Müdür", "executive", "Genel Müdür", "Doğuş Otomotiv"),
@@ -108,25 +137,6 @@ KPIS = {
                ("Kayıtlı kullanım senaryosu", "adet", "up", 0, 60, 41, "AI Studio yönetim paneli")],
 }
 
-ORG = [
-    ("Doğuş Otomotiv", None, "şirket", None, 2400, "Çok markalı otomotiv distribütörü ve perakendecisi.", None),
-    ("Satış & Pazarlama", "Doğuş Otomotiv", "fonksiyon", "Satış & Bayi Yönetimi", 380, "Marka satış organizasyonları ve bayi ağı yönetimi.",
-     "Lead takibi dağınık, bayi performans raporları manuel hazırlanıyor."),
-    ("Pazarlama İletişimi", "Satış & Pazarlama", "birim", "Pazarlama", 60, "Kampanya ve marka iletişimi.", "İçerik üretim hızı, marka uyum kontrolü."),
-    ("Satış Sonrası Hizmetler", "Doğuş Otomotiv", "fonksiyon", "Satış Sonrası & Servis", 420, "Servis ağı, garanti ve teknik destek.",
-     "Garanti reddi kayıpları, teknik bilgiye erişim süresi."),
-    ("Yedek Parça", "Satış Sonrası Hizmetler", "birim", "Yedek Parça & Lojistik", 310, "Parça planlama, depo ve dağıtım.",
-     "Acil sipariş maliyeti, stok fazlası, bayi bazlı talep oynaklığı."),
-    ("Müşteri İlişkileri", "Doğuş Otomotiv", "birim", "Müşteri Deneyimi & CRM", 140, "Çağrı merkezi ve şikâyet yönetimi.",
-     "Yüksek çağrı hacmi, şikâyet kök neden analizi yapılamıyor."),
-    ("Finans", "Doğuş Otomotiv", "fonksiyon", "Finans & Muhasebe", 160, "Muhasebe, hazine, bütçe ve raporlama.", "Manuel mutabakat, ay sonu kapanış süresi."),
-    ("İnsan Kaynakları", "Doğuş Otomotiv", "fonksiyon", "İnsan Kaynakları", 45, "İşe alım, yetenek ve çalışan deneyimi.", None),
-    ("Satın Alma", "Doğuş Otomotiv", "birim", "Tedarik Zinciri & Satın Alma", 35, "Dolaylı satın alma ve tedarikçi yönetimi.", None),
-    ("Filo Kiralama", "Doğuş Otomotiv", "iştirak", "Filo & Kiralama", 120, "Kurumsal filo kiralama operasyonu.", "Araç iade hasar süreçleri, kalan değer tahmini."),
-    ("Hukuk", "Doğuş Otomotiv", "birim", "Kurumsal Hizmetler & Hukuk", 18, "Sözleşmeler ve uyum.", None),
-    ("Dijital Dönüşüm", "Doğuş Otomotiv", "birim", "BT & Siber Güvenlik", 25, "AI Impact programının sahibi.", None),
-]
-
 INITIATIVES = [
     ("ai-studio", "AI Studio", "platform", "Kurumsal LLM erişim platformu. Çalışanlar onaylı modellere güvenli şekilde erişir, kendi asistanlarını oluşturur.",
      "Dijital Dönüşüm Lideri", "Ölçeklendirme — 1.120 aktif kullanıcı", "yesil"),
@@ -161,7 +171,7 @@ AI-001 Servis Danışmanı Asistanı: Canlıda. Audi bülten entegrasyonu tamaml
 
 AI-002 Garanti Talebi Ön Kontrol: Üretici kural seti hâlâ bekleniyor; pilot genişletmesi ertelendi. UAT tarihi iki hafta kaydı.
 
-AI-003 Yedek Parça Talep Tahmini: ERP veri erişimi onayı ikinci haftadır bekleniyor, geliştirme fiilen durdu. Ekipten bir veri bilimci başka projeye kaydırıldı. Hedef tarih gecikme riski yüksek.
+AI-003 Yedek Parça Talep Tahmini: ERP veri erişimi onayı ikinci haftadır bekleniyor, geliştirme fiilen durdu. Ekipten bir veri bilimci başka projeye kaydırıldı. Yeni hedef tarih: {hedef_dt}.
 
 AI-004 Bayi Performans Kopilotu: Pilot sürüyor, 12 brifing üretildi. Sonraki hafta Audi bölgeleri eklenecek.
 
@@ -173,67 +183,166 @@ AI-012 AI Studio: Finans ekibi onboarding tamamlandı, aktif kullanıcı 1.120.
 """
 
 
+
+INTERNAL_NOTES = """Dijital Dönüşüm — AI Impact İç Değerlendirme Notları
+
+AI-003 Yedek Parça Talep Tahmini: DT gecikmeyi 1 hafta olarak raporluyor ancak ERP yetkisi gelmeden model eğitimi başlayamaz; bizim tahminimiz en az 6 hafta. Hedef canlı tarihi {hedef_ic} olarak revize edilmeli. Karar: BT Güvenlik ile eskalasyon toplantısı yapılacak.
+Aksiyon: ERP erişim onayı için BT Güvenlik direktörüyle görüşme.
+
+AI-005 Çağrı Merkezi Konuşma Analitiği: Canlıda fakat ACW baseline verisi hâlâ yok. Etki raporlanamıyor; ölçüm planı olmadan ölçeklendirmeye geçilmemeli.
+
+AI-002 Garanti Talebi Ön Kontrol: Üretici kural seti gecikmesi bizim kontrolümüz dışında. Pilot sonuçları umut verici; bayiler memnun. Riskli değil dikkat seviyesinde izlenmeli.
+
+AI-004 Bayi Performans Kopilotu: Bölge müdürlerinden olumlu geri bildirim. Audi bölgelerine genişleme için sponsor onayı alındı.
+"""
+
+PDD_AI002 = [
+    ("title", "AI-002 Garanti Talebi Ön Kontrol — Proje Tanım Dokümanı (PDD)"),
+    ("h", "Genel Bilgiler"),
+    ("p", "Sponsor: Satış Sonrası Direktörü"),
+    ("p", "Başlangıç: 01.04.2026"),
+    ("p", "Hedef canlı tarihi: 30.11.2026"),
+    ("h", "Problem ve Çözüm"),
+    ("p", "Problem: Bayilerden gelen garanti taleplerinin yaklaşık %9,5'i üretici tarafından reddediliyor; ret sonrası maliyet distribütörde kalıyor."),
+    ("p", "Çözüm: Talepler üreticiye gönderilmeden önce kural seti ve geçmiş ret verisiyle eğitilmiş model tarafından ön kontrolden geçirilir; riskli talepler işaretlenir."),
+    ("h", "Hedef KPI'lar"),
+    ("p", "KPI: Garanti ret oranı | baseline 9,5 | hedef 5 | %"),
+    ("p", "KPI: Talep başına kontrol süresi | baseline 18 | hedef 6 | dk"),
+    ("p", "Tahmini yıllık kazanım: 9.500.000 TL"),
+]
+
+BENEFIT_AI001 = [
+    ("Proje", "AI-001 Servis Danışmanı Asistanı"),
+    ("Dönem", "2026 Q3"),
+    ("Gerçekleşen yıllık kazanım", "15.200.000 TL"),
+    ("FTE", "22"),
+    ("KPI", "Ortalama bilgi arama süresi | baseline 12 | hedef 4 | gerçekleşen 3,2 | dk"),
+    ("KPI", "İlk seferde doğru teşhis oranı | baseline 71 | hedef 80 | gerçekleşen 79 | %"),
+    ("Ölçüm yöntemi", "DMS iş emri verisi ve 40 servis danışmanıyla zaman etüdü; Finans ile mutabık kalındı."),
+]
+
+
+def _docx_bytes(blocks) -> bytes:
+    import docx
+    d = docx.Document()
+    for kind, text in blocks:
+        if kind == "title":
+            d.add_heading(text, level=0)
+        elif kind == "h":
+            d.add_heading(text, level=1)
+        else:
+            d.add_paragraph(text)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def _report_docx(text: str) -> bytes:
+    lines = [l for l in text.splitlines()]
+    blocks = [("title", lines[0])] + [("p", l) for l in lines[1:] if l.strip()]
+    return _docx_bytes(blocks)
+
+
+def _xlsx_bytes(rows) -> bytes:
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Kazanım"
+    ws.append(["Kalem", "Değer"])
+    for r in rows:
+        ws.append(list(r))
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _add_doc(filename: str, data: bytes, doc_type: str | None, source: str, doc_date: str, user_id: int) -> int:
+    stored = save_stream([data], filename)
+    did = db.insert("documents", {
+        "title": filename.rsplit(".", 1)[0], "filename": filename, "storage_path": stored["storage_path"], "sha256": stored["sha256"],
+        "size": stored["size"], "doc_type": doc_type or "diger", "type_source": "kullanici" if doc_type else "otomatik",
+        "source": source, "doc_date": doc_date, "status": "sirada", "uploaded_by": user_id, "uploaded_at": doc_date + "T10:00:00"})
+    pipeline.process_document(did)
+    return did
+
+
 def seed_demo() -> None:
     if db.scalar("SELECT COUNT(*) FROM projects"):
         return
-    admin_id = db.scalar("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
+    team_id = db.scalar("SELECT id FROM users WHERE email = ?", (TEAM_EMAIL,))
     ids = {}
     for email, name, role, title, org in USERS:
         if not db.scalar("SELECT 1 FROM users WHERE email = ?", (email,)):
             ids[role] = db.insert("users", {"email": email, "name": name, "role": role, "title": title, "organization": org,
                                             "password_hash": hash_password("Demo123!"), "created_at": db.now()})
+    deps = {r["name"]: r["id"] for r in db.rows("SELECT id, name FROM departments")}
+    for name, pain in PAIN_POINTS.items():
+        if name in deps:
+            db.update("departments", deps[name], {"pain_points": pain})
     pids = {}
     for (code, name, vc, unit, brands, ai_type, stage, health, prio, sponsor, owner, dt, start, target, golive,
          meas, est, real, fte, sec, dclass, risk, summary) in PROJECTS:
         pids[code] = db.insert("projects", {
-            "code": code, "name": name, "value_chain": vc, "business_unit": unit, "brands": brands, "ai_type": ai_type,
-            "stage": stage, "health": health, "priority": prio, "sponsor": sponsor, "owner": owner, "dt_lead": dt,
+            "code": code, "name": name, "department_id": deps.get(VC_TO_DEPT.get(vc)), "business_unit": unit, "brands": brands,
+            "ai_type": ai_type, "stage": stage, "health": health, "priority": prio, "sponsor": sponsor, "owner": owner, "dt_lead": dt,
             "start_date": _d(start) if start is not None else None, "target_date": _d(target) if target is not None else None,
             "golive_date": _d(golive) if golive is not None else None, "measurement_status": meas,
             "estimated_value": est, "realized_value": real, "fte_saving": fte, "security_review": sec, "data_class": dclass,
-            "ai_risk_score": risk, "summary": summary,
-            "problem": summary if stage != "fikir" else None,
-            "visible_to_dt": 0 if code == "AI-011" else 1,
+            "ai_risk_score": risk, "summary": summary, "problem": summary if stage != "fikir" else None,
+            "aliases": "Talep tahmini, Parça tahminleme" if code == "AI-003" else None,
             "created_at": _ts(start or -5), "updated_at": _ts(-2),
         })
-        db.insert("stage_history", {"project_id": pids[code], "from_stage": None, "to_stage": "fikir",
-                                    "note": "Kayıt açıldı", "user_id": admin_id, "at": _ts(start or -5)})
+        db.insert("stage_history", {"project_id": pids[code], "from_stage": None, "to_stage": "fikir", "note": "Kayıt açıldı",
+                                    "user_id": team_id, "at": _ts(start or -5)})
         if stage != "fikir":
-            db.insert("stage_history", {"project_id": pids[code], "from_stage": "fikir", "to_stage": stage,
-                                        "note": "Demo verisi", "user_id": admin_id, "at": _ts(-20)})
+            db.insert("stage_history", {"project_id": pids[code], "from_stage": "fikir", "to_stage": stage, "note": "Demo verisi",
+                                        "user_id": team_id, "at": _ts(-20)})
     for code, ks in KPIS.items():
         for name, unit, direction, base, target, actual, method in ks:
             db.insert("kpis", {"project_id": pids[code], "name": name, "unit": unit, "direction": direction, "baseline": base,
                                "target": target, "actual": actual, "method": method, "measured_at": _d(-7) if actual else None})
-    for code, cat, title in [("AI-001", "İş Analizi / Business Case", "Servis Asistanı Business Case"),
-                             ("AI-001", "Pilot Sonuç Raporu", "Pilot Sonuç Raporu"),
-                             ("AI-001", "Güvenlik Değerlendirmesi", "AI Güvenlik Değerlendirmesi"),
-                             ("AI-002", "İş Analizi / Business Case", "Garanti Ön Kontrol İş Değeri"),
-                             ("AI-002", "Gereksinim", "Gereksinim Dokümanı v2"),
-                             ("AI-003", "İş Analizi / Business Case", "Talep Tahmini Business Case"),
-                             ("AI-012", "Teknik Tasarım", "AI Studio Mimari")]:
-        stored = f"demo-{pids[code]}-{len(title)}.txt"
-        content = f"{title}\n\nDemo dokümanı — gerçek doküman yüklendiğinde içerik AI analizinde kullanılır."
-        (UPLOAD_DIR / stored).write_text(content, encoding="utf-8")
-        db.insert("documents", {"project_id": pids[code], "title": title, "category": cat, "filename": f"{title}.txt",
-                                "stored_name": stored, "mime": "text/plain", "size": len(content), "text_content": content,
-                                "uploaded_by": ids.get("dde", admin_id), "uploaded_at": _ts(-30)})
-    actions = [("AI-003", "ERP veri erişim onayının BT Güvenlik'ten çıkarılması", "BT Güvenlik Müdürü", _d(-3)),
-               ("AI-002", "Üretici garanti kural setinin DT'ye iletilmesi", "Garanti Müdürü", _d(4)),
+    actions = [("AI-002", "Üretici garanti kural setinin DT'ye iletilmesi", "Garanti Müdürü", _d(4)),
                ("AI-005", "ACW baseline verisinin çağrı merkezinden alınması", "CRM Müdürü", _d(7)),
                ("AI-010", "Lisans kararı için hukuk-satın alma toplantısı", "Hukuk Müdürü", _d(-10)),
                ("AI-008", "Güvenlik değerlendirmesinin başlatılması", "Bilgi Güvenliği", _d(14))]
     for code, title, owner, due in actions:
         db.insert("actions", {"project_id": pids[code], "title": title, "owner": owner, "due_date": due, "status": "acik",
-                              "source": "Haftalık değerlendirme", "created_by": ids.get("dde", admin_id), "created_at": _ts(-8)})
-    org_ids = {}
-    for name, parent, kind, vc, hc, desc, pain in ORG:
-        org_ids[name] = db.insert("org_units", {"name": name, "parent_id": org_ids.get(parent), "kind": kind, "value_chain": vc,
-                                                "headcount": hc, "description": desc, "pain_points": pain})
+                              "source": "Haftalık değerlendirme", "created_by": team_id, "created_at": _ts(-8)})
     for slug, name, cat, desc, owner, status, health in INITIATIVES:
         db.insert("initiatives", {"slug": slug, "name": name, "category": cat, "description": desc, "owner": owner,
                                   "status": status, "health": health, "created_at": _ts(-200)})
-    # Güvenlik metrikleri: son 9 ay
+    _seed_security()
+
+    # --- Dokümanlar: gerçek işleme hattından geçer ---
+    monday = date.today() - timedelta(days=date.today().weekday())
+    w2, w1 = (monday - timedelta(days=14)).isoformat(), (monday - timedelta(days=7)).isoformat()
+    r1 = _add_doc(f"DT Haftalık Durum Raporu {w2}.txt", REPORT_1.encode(), "dt_durum", "Doğuş Teknoloji", w2, team_id)
+    for f in knowledge.pending():  # eski raporun önerileri onaylanmış olsun
+        if f["document_id"] == r1:
+            knowledge.apply_fact(f["id"], team_id)
+    fmt = lambda days: (date.today() + timedelta(days=days)).strftime("%d.%m.%Y")  # noqa: E731
+    report2 = REPORT_2.replace("{hedef_dt}", fmt(25))
+    notes = INTERNAL_NOTES.replace("{hedef_ic}", fmt(55))
+    _add_doc(f"DT Haftalık Durum Raporu {w1}.docx", _report_docx(report2), "dt_durum", "Doğuş Teknoloji", w1, team_id)
+    _add_doc("DDE İç Değerlendirme Notları.docx", _docx_bytes([("title", notes.splitlines()[0])] +
+             [("p", l) for l in notes.splitlines()[1:] if l.strip()]), None, "Dijital Dönüşüm", _d(-3), team_id)
+    _add_doc("AI-002 PDD.docx", _docx_bytes(PDD_AI002), "pdd", "Dijital Dönüşüm", _d(-180), team_id)
+    _add_doc("AI-001 Kazanım Raporu Q3.xlsx", _xlsx_bytes(BENEFIT_AI001), "kazanim", "İş Birimi", _d(-10), team_id)
+    pipeline.drain()
+
+    comments = [("project", pids["AI-003"], ids.get("executive"), "ERP erişimi neden 2 haftadır bekliyor? Bu hafta sonuna kadar çözülsün, gerekirse bana eskale edin."),
+                ("project", pids["AI-005"], team_id, "Canlıya çıktı ama baseline yok. Ölçüm planını önümüzdeki komitede netleştirelim."),
+                ("project", pids["AI-001"], ids.get("viewer"), "Servis ekiplerinden çok olumlu geri bildirim var. Porsche servislerine de genişletebilir miyiz?"),
+                ("initiative", 2, ids.get("executive"), "Shadow AI kullanıcı sayısı düşüyor, güzel. Hangi birimler hâlâ en çok kullanıyor?"),
+                ("initiative", 1, team_id, "Finans onboarding tamamlandı. Sırada İK ve Hukuk var.")]
+    for t, tid, uid, body in comments:
+        db.insert("comments", {"target_type": t, "target_id": tid, "user_id": uid or team_id, "body": body, "created_at": _ts(-3)})
+    pipeline.enqueue("gap")
+    pipeline.drain()
+    db.log(team_id, "seed", detail="Demo verisi yüklendi")
+
+
+def _seed_security() -> None:
     base = date.today().replace(day=1)
     months = []
     for i in range(8, -1, -1):
@@ -256,24 +365,5 @@ def seed_demo() -> None:
         "projects_security_reviewed": [30, 33, 40, 45, 50, 55, 58, 60, 62],
     }
     for metric, vals in trends.items():
-        for period, v in zip(months, vals):
-            security.upsert(period, metric, v)
-    # Haftalık raporlar + analiz
-    for weeks_ago, text in ((2, REPORT_1), (1, REPORT_2)):
-        week = date.today() - timedelta(days=date.today().weekday() + 7 * weeks_ago)
-        rid = db.insert("weekly_reports", {"week_start": week.isoformat(), "title": f"DT Haftalık Durum Raporu — {week.strftime('%d.%m.%Y')}",
-                                           "filename": "rapor.txt", "text_content": text, "uploaded_by": ids.get("dt", admin_id),
-                                           "uploaded_at": _ts(-7 * weeks_ago + 1)})
-        store_report_analysis(rid, ai._mock_report_analysis(text), apply=True, user_id=admin_id,
-                              at=(week + timedelta(days=1)).isoformat() + "T10:00:00")
-    comments = [("project", pids["AI-003"], ids.get("executive"), "ERP erişimi neden 2 haftadır bekliyor? Bu hafta sonuna kadar çözülsün, gerekirse bana eskale edin."),
-                ("project", pids["AI-003"], ids.get("dt"), "BT Güvenlik ile toplantı Perşembe günü planlandı. Onay gelirse 1 haftalık gecikmeyle hedefe yetişebiliriz."),
-                ("project", pids["AI-005"], ids.get("dde"), "Canlıya çıktı ama baseline yok. Ölçüm planını önümüzdeki komitede netleştirelim."),
-                ("project", pids["AI-001"], ids.get("viewer"), "Servis ekiplerinden çok olumlu geri bildirim var. Porsche servislerine de genişletebilir miyiz?"),
-                ("initiative", 2, ids.get("executive"), "Shadow AI kullanıcı sayısı düşüyor, güzel. Hangi birimler hâlâ en çok kullanıyor?"),
-                ("initiative", 1, ids.get("dde"), "Finans onboarding tamamlandı. Sırada İK ve Hukuk var.")]
-    for t, tid, uid, body in comments:
-        db.insert("comments", {"target_type": t, "target_id": tid, "user_id": uid or admin_id, "body": body, "created_at": _ts(-3)})
-    db.insert("ai_insights", {"kind": "gap", "title": "AI Olgunluk ve Boşluk Analizi", "body": ai._mock_gap_analysis(),
-                              "created_by": admin_id, "created_at": _ts(-1)})
-    db.log(admin_id, "seed", detail="Demo verisi yüklendi")
+        for per, v in zip(months, vals):
+            security.upsert(per, metric, v)
