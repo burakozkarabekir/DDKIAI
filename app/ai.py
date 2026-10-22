@@ -77,7 +77,8 @@ def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool 
                             "temperature": config.AI_TEMPERATURE}
                     headers = _auth_headers("x-api-key", bearer=False)
                     headers["anthropic-version"] = "2023-06-01"
-                    r = client.post(f"{config.AI_BASE_URL}/v1/messages", headers=headers, json=body)
+                    base = config.AI_BASE_URL[:-3] if config.AI_BASE_URL.endswith("/v1") else config.AI_BASE_URL
+                    r = client.post(f"{base}/v1/messages", headers=headers, json=body)
                     _raise(r)
                     return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
                 body = {"messages": [{"role": "system", "content": system}, *messages], "max_tokens": max_tokens,
@@ -349,6 +350,19 @@ def _sentences(text: str) -> list[str]:
     return [s.strip(" -•\t") for s in re.split(r"(?<=[.!?])\s+|\n", text) if len(s.strip()) > 12]
 
 
+def _row_pairs(body: str) -> list[tuple[str, str]]:
+    """'Durum: … | Sonraki adım: …' biçimindeki tablo satırlarını (sütun, değer) çiftlerine ayırır."""
+    out = []
+    for line in body.splitlines():
+        if " | " not in line:
+            continue
+        for cell in line.split(" | "):
+            key, sep, val = cell.partition(": ")
+            if sep and 0 < len(key) <= 40 and val.strip():
+                out.append((key.strip(), val.strip()))
+    return out
+
+
 def _mock_extract(doc: dict, text: str) -> dict:
     doc_type = doc["doc_type"] if doc["type_source"] == "kullanici" else guess_type(doc["filename"], text)
     m = _DATE_RE.search(doc["filename"] + " " + text[:200])
@@ -369,18 +383,34 @@ def _mock_extract(doc: dict, text: str) -> dict:
         body = re.sub(r"^\s*[A-Z]{2,4}-\d+[^:\n]*:\s*", "", body.strip())
         sents = _sentences(body)
         low = body.lower()
-        if doc_type in ("dt_durum", "ic_not", "toplanti", "pilot", "diger", "sunum"):
+        pairs = _row_pairs(body)
+        if pairs:  # tablo satırı: sütun adlarına göre eşle
+            for key, val in pairs:
+                k = knowledge.norm(key)
+                if any(w in k for w in ("durum", "status", "ilerleme", "aciklama", "yorum", "gelisme")):
+                    add(pid, "durum", val[:500], evidence=f"{key}: {val}"[:200])
+                elif any(w in k for w in ("engel", "bagimlilik", "blocker", "sorun", "issue")):
+                    add(pid, "engel", val[:300], evidence=f"{key}: {val}"[:200])
+                elif any(w in k for w in ("risk",)):
+                    add(pid, "risk", val[:300], evidence=f"{key}: {val}"[:200])
+                elif any(w in k for w in ("sonraki", "next", "plan", "aksiyon")):
+                    add(pid, "sonraki_adim", val[:300], evidence=f"{key}: {val}"[:200])
+                elif any(w in k for w in ("hedef", "bitis", "canli", "termin", "due")) and _DATE_RE.search(val):
+                    add(pid, "tarih", knowledge._iso(_DATE_RE.search(val).group(1)),
+                        field="golive_date" if "canli" in k and "hedef" not in k else "target_date", evidence=f"{key}: {val}"[:200])
+        if doc_type in ("dt_durum", "ic_not", "toplanti", "pilot", "diger", "sunum") and not pairs:
             if sents:
                 add(pid, "durum" if doc_type == "dt_durum" else "not", " ".join(sents[:2])[:500], evidence=sents[0][:200])
+        if doc_type in ("dt_durum", "ic_not", "toplanti", "pilot", "diger", "sunum"):
             hits = [w for w in _RISK_WORDS if w in low]
             if doc_type == "dt_durum":
                 score = min(95, 10 + sum(_RISK_WORDS[w][0] for w in hits))
                 health = "kirmizi" if score >= 60 else "sari" if score >= 35 else "yesil"
                 add(pid, "saglik", health, value_num=score,
                     evidence="; ".join(_RISK_WORDS[w][1] for w in hits[:3]) or "Belirgin risk sinyali yok")
-            if hits:
+            if hits and not pairs:
                 add(pid, "risk", "; ".join(_RISK_WORDS[w][1] for w in hits[:3]).capitalize(), value_num=min(95, 10 + sum(_RISK_WORDS[w][0] for w in hits)))
-            for s in sents:
+            for s in ([] if pairs else sents):
                 sl = s.lower()
                 if sl.startswith("aksiyon"):
                     add(pid, "aksiyon", s.split(":", 1)[-1].strip()[:300], evidence=s[:200])

@@ -44,6 +44,8 @@
       <span>· {{ c.created_at|ago }}</span>
       {% if c.kind == 'durum' %}<span class="badge">Durum</span>{% elif c.kind == 'trello' %}<span class="badge">Trello</span>{% endif %}
       {% if c.user_id == user.id or user.role == 'admin' %}
+      <details class="inline edit" style="display:inline-block"><summary class="btn ghost sm">Düzenle</summary>
+        <div class="popover"><form method="post" action="/yorum/{{ c.id }}/duzenle"><textarea name="body" rows="4">{{ c.body }}</textarea><button class="btn primary sm" style="margin-top:6px">Kaydet</button></form></div></details>
       <form method="post" action="/yorum/{{ c.id }}/sil" style="display:inline" data-confirm="Yorum silinsin mi?"><button class="btn ghost sm" title="Sil">Sil</button></form>{% endif %}
     </div>
     <div class="body prose">{{ c.body|md }}</div>
@@ -76,3 +78,32 @@
 {% macro doc_status(s, labels) -%}
 <span class="dstatus {{ s }}">{{ labels.get(s, s) }}</span>
 {%- endmacro %}
+
+{% macro action_edit(a) %}
+<details class="inline edit"><summary class="btn ghost sm" title="Düzenle">✎</summary>
+  <div class="popover">
+    <form method="post" action="/aksiyon/{{ a.id }}/duzenle">
+      <div class="field"><label>Aksiyon</label><input name="title" value="{{ a.title }}" required></div>
+      <div class="row"><div style="flex:1"><label>Sorumlu</label><input name="owner" value="{{ a.owner or '' }}"></div>
+        <div style="flex:1"><label>Termin</label><input type="date" name="due_date" value="{{ a.due_date or '' }}"></div></div>
+      <div class="row" style="margin-top:8px"><button class="btn primary sm">Kaydet</button></div>
+    </form>
+    <form method="post" action="/aksiyon/{{ a.id }}/sil" data-confirm="Aksiyon silinsin mi?" style="margin-top:6px"><button class="btn ghost sm danger">Sil</button></form>
+  </div>
+</details>
+{% endmacro %}
+
+{% macro fact_edit(f) %}
+<details class="inline edit"><summary class="btn ghost sm" title="Değeri düzelt">✎</summary>
+  <div class="popover">
+    <form method="post" action="/bilgi/{{ f.id }}/deger">
+      <div class="field"><label>{{ f.label }}</label>
+        {% if f.fact_type in ('kpi','kazanim') and f.field != 'measurement_status' %}<input name="value" value="{{ f.value_num if f.value_num is not none else '' }}" inputmode="decimal">
+        {% elif f.fact_type == 'tarih' %}<input type="date" name="value" value="{{ f.value_text or '' }}">
+        {% else %}<textarea name="value" rows="3">{{ f.value_text or '' }}</textarea>{% endif %}</div>
+      <div class="field"><label>Tarih</label><input type="date" name="as_of" value="{{ f.as_of or '' }}"></div>
+      <button class="btn primary sm">Kaydet</button>
+    </form>
+  </div>
+</details>
+{% endmacro %}

@@ -132,7 +132,7 @@ def process_document(doc_id: int) -> None:
     result = ai.extract_document(doc, text)
     store_extraction(doc, result)
 
-    data = {"status": "islendi", "processed_at": db.now(), "error": ex["warning"]}
+    data = {"status": "islendi", "processed_at": db.now(), "error": ex["warning"], "ai_mode": "live" if ai.is_live() else "mock"}
     db.update("documents", doc_id, data)
     doc = db.row("SELECT * FROM documents WHERE id = ?", (doc_id,))
     if doc["doc_type"] in ("dt_durum", "ic_not", "toplanti"):
@@ -223,8 +223,9 @@ def gap_insight(_ref=None) -> None:
 HANDLERS = {"document": process_document, "weekly": weekly_insight, "synthesis": project_synthesis, "gap": gap_insight}
 
 
-def reprocess_all() -> int:
-    ids = [r["id"] for r in db.rows("SELECT id FROM documents")]
+def reprocess_all(only_mock: bool = False) -> int:
+    where = "WHERE ai_mode = 'mock' OR ai_mode IS NULL" if only_mock else ""
+    ids = [r["id"] for r in db.rows(f"SELECT id FROM documents {where}")]
     for i in ids:
         db.update("documents", i, {"status": "sirada"})
         enqueue("document", i)

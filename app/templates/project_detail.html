@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import health, stage, risk, comments_block, upload_form, doc_type %}
+{% from "partials/macros.html" import health, stage, risk, comments_block, upload_form, doc_type, action_edit %}
 {% block title %}{{ p.code }} {{ p.name }}{% endblock %}
 {% block crumbs %}<a href="/projeler">Projeler</a> / {{ p.code }}{% endblock %}
 {% block topactions %}
@@ -13,7 +13,7 @@
     <div class="row" style="margin-bottom:6px"><span class="code">{{ p.code }}</span>{{ stage(p.stage) }}{{ health(p.health) }}
       {% if user.role != 'dt' and p.ai_risk_score is not none %}<span class="small muted">AI risk</span>{{ risk(p.ai_risk_score) }}{% endif %}
       {% if p.priority %}<span class="badge">Öncelik: {{ p.priority }}</span>{% endif %}
-      {% if not p.visible_to_dt %}<span class="badge" title="Doğuş Teknoloji kullanıcıları bu projeyi görmez">DT'ye kapalı</span>{% endif %}</div>
+      {% for t in (p.tags or '').split(',') if t.strip() %}<span class="badge tag">{{ t.strip() }}</span>{% endfor %}</div>
     <h1>{{ p.name }}</h1>
     <p>{{ p.summary or '' }}</p>
   </div>
@@ -101,8 +101,13 @@
       {% set prog = none %}
       {% if k.baseline is not none and k.target is not none and k.actual is not none and k.target != k.baseline %}{% set prog = ((k.actual - k.baseline) / (k.target - k.baseline) * 100) %}{% endif %}
       <tr>
+        {% if user.role in D.CAN_UPLOAD %}
+        <td style="min-width:200px"><input form="kpi-{{ k.id }}" name="name" value="{{ k.name }}"><div class="row small" style="margin-top:4px"><input form="kpi-{{ k.id }}" name="unit" value="{{ k.unit or '' }}" placeholder="birim" style="width:80px">{% if k.measured_at %}<span class="muted">ölçüm {{ k.measured_at|date }}</span>{% endif %}</div></td>
+        <td class="small"><select form="kpi-{{ k.id }}" name="direction" style="width:auto"><option value="up" {{ 'selected' if k.direction == 'up' }}>↑ artmalı</option><option value="down" {{ 'selected' if k.direction == 'down' }}>↓ azalmalı</option></select></td>
+        {% else %}
         <td><b>{{ k.name }}</b><div class="small muted">{{ k.unit or '' }}{% if k.measured_at %} · ölçüm {{ k.measured_at|date }}{% endif %}</div></td>
         <td class="small">{{ '↑ artmalı' if k.direction == 'up' else '↓ azalmalı' }}</td>
+        {% endif %}
         {% if user.role in D.CAN_UPLOAD %}
         <td><input form="kpi-{{ k.id }}" name="baseline" value="{{ k.baseline if k.baseline is not none else '' }}" style="width:96px" inputmode="decimal"></td>
         <td><input form="kpi-{{ k.id }}" name="target" value="{{ k.target if k.target is not none else '' }}" style="width:96px" inputmode="decimal"></td>
@@ -158,14 +163,13 @@
     <div class="card">
       <div class="card-head"><h3>Onay bekleyen öneriler</h3><span class="badge">{{ pending|length }}</span></div>
       {% if pending %}
-      <form method="post" action="/inceleme">
+      <form id="bulk-p" method="post" action="/inceleme"></form>
         {% for f in pending %}
-        <label class="suggest"><input type="checkbox" name="fact_id" value="{{ f.id }}" checked>
+        <label class="suggest"><input form="bulk-p" type="checkbox" name="fact_id" value="{{ f.id }}" checked>
           <span><b>{{ f.label }}</b><br><span class="small"><span class="muted">{{ f.current|truncate(60) }}</span> → <b>{{ f.display|truncate(140) }}</b></span>
           <br><span class="small muted">{{ D.DOC_TYPES[f.doc_type][0] }} · <a class="cite" href="/dokumanlar/{{ f.document_id }}">D{{ f.document_id }}</a>{% if f.evidence %} · “{{ f.evidence|truncate(90) }}”{% endif %}</span></span></label>
         {% endfor %}
-        <div class="row" style="margin-top:10px"><button class="btn primary sm" name="action" value="onayla">Seçilenleri uygula</button><button class="btn ghost sm" name="action" value="reddet">Reddet</button></div>
-      </form>
+        <div class="row" style="margin-top:10px"><button form="bulk-p" class="btn primary sm" name="action" value="onayla">Seçilenleri uygula</button><button form="bulk-p" class="btn ghost sm" name="action" value="reddet">Reddet</button></div>
       {% else %}<p class="small muted" style="margin:0">Bekleyen öneri yok.</p>{% endif %}
     </div>
     <div class="card">
@@ -208,7 +212,8 @@
   <ul class="list-plain">{% for a in actions %}
     <li class="row"><form method="post" action="/aksiyon/{{ a.id }}/durum">{% if user.role in D.CAN_UPLOAD %}<button class="btn sm">{{ '✓ Kapat' if a.status == 'acik' else '↺ Aç' }}</button>{% endif %}</form>
       <span style="{{ 'text-decoration:line-through;color:var(--muted)' if a.status == 'kapali' }}">{{ a.title }}</span><span class="spacer"></span>
-      <span class="small muted">{{ a.owner or '—' }}</span><span class="small {{ 'health kirmizi' if a.status == 'acik' and a.due_date|overdue else 'muted' }}">{{ a.due_date|date }}</span></li>
+      <span class="small muted">{{ a.owner or '—' }}</span><span class="small {{ 'health kirmizi' if a.status == 'acik' and a.due_date|overdue else 'muted' }}">{{ a.due_date|date }}</span>
+      {% if editor %}{{ action_edit(a) }}{% endif %}</li>
   {% else %}<li class="empty">Aksiyon yok.</li>{% endfor %}</ul>
 </div>
 

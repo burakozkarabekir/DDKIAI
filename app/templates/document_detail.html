@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import doc_type, doc_status, health %}
+{% from "partials/macros.html" import doc_type, doc_status, health, fact_edit %}
 {% block title %}{{ d.title }}{% endblock %}
 {% block crumbs %}<a href="/dokumanlar">Dokümanlar</a> / D{{ d.id }}{% endblock %}
 {% block topactions %}
@@ -21,6 +21,15 @@
 {% elif d.status == 'hata' %}<div class="flash error"><b>İşleme hatası.</b> {{ d.error|truncate(600) }} — Ayarlar'dan AI bağlantısını kontrol edip yeniden işleyin.</div>
 {% elif d.status == 'metin_yok' %}<div class="flash warn">{{ d.error }}</div>
 {% elif d.error %}<div class="flash warn">{{ d.error }}</div>{% endif %}
+{% if d.status == 'islendi' and d.ai_mode != 'live' %}
+<div class="flash warn">{% if ai_live() %}Bu doküman AI bağlanmadan önce <b>demo (kural tabanlı) modunda</b> işlendi. Gerçek analiz için
+  <form method="post" action="/dokumanlar/{{ d.id }}/yeniden-isle" style="display:inline"><button class="btn primary sm">yeniden işleyin</button></form>.
+  {% else %}<b>AI bağlı değil</b>: bu sonuçlar kural tabanlıdır, metin yorumlanmadı. AI bağlantısını <a href="/ayarlar#ai">Ayarlar</a>'dan kontrol edin, sonra yeniden işleyin.{% endif %}</div>
+{% endif %}
+{% if d.status == 'islendi' and not links %}
+<div class="callout" style="margin-bottom:16px">Doküman hiçbir projeyle eşleşmedi. Dokümanda proje kodları (ör. <b>UC88</b>) ya da proje adları geçiyorsa projelerin sistemde olduğundan emin olun
+  (<a href="/ayarlar#trello">Trello'dan aktar</a>), ya da sağdan projeyi elle bağlayıp yeniden işleyin. Projelerin dokümanlarda geçen farklı adlarını proje sayfasındaki <b>Diğer adlar</b> alanına ekleyebilirsiniz.</div>
+{% endif %}
 
 <div class="grid g-main">
   <div class="stack">
@@ -34,21 +43,20 @@
       <div class="card-head"><h2>Çıkarılan bilgiler</h2><span class="muted small">{{ grouped.values()|map('length')|sum }} bilgi</span></div>
       {% for (code, pname), items in grouped.items() if code %}
       <h3 style="margin-top:14px"><span class="code">{{ code }}</span> {{ pname }}</h3>
-      <form method="post" action="/inceleme">
+      <form id="bulk-{{ code }}" method="post" action="/inceleme"></form>
       <table class="facts">
         {% for f in items %}
         <tr class="st-{{ f.status }}">
-          <td style="width:24px">{% if f.status == 'oneri' %}<input type="checkbox" name="fact_id" value="{{ f.id }}" checked>{% endif %}</td>
+          <td style="width:24px">{% if f.status == 'oneri' %}<input form="bulk-{{ code }}" type="checkbox" name="fact_id" value="{{ f.id }}" checked>{% endif %}</td>
           <td class="small nowrap" style="width:170px"><b>{{ f.label }}</b><div class="muted">{{ f.as_of|date }}{% if f.confidence %} · güven %{{ (f.confidence * 100)|round|int }}{% endif %}</div></td>
           <td class="small">{% if f.fact_type == 'saglik' %}{{ health(f.value_text) }} <span class="muted">risk {{ f.value_num|num }}</span>{% else %}{{ f.display }}{% endif %}
             {% if f.status == 'oneri' %}<div class="muted">Şu an: {{ f.current|truncate(100) }}</div>{% endif %}
             {% if f.evidence and f.fact_type not in ('durum','not') %}<div class="quote">“{{ f.evidence }}”</div>{% endif %}</td>
-          <td class="small nowrap" style="width:96px">{{ {'bilgi':'Bilgi','oneri':'Onay bekliyor','onaylandi':'Uygulandı','reddedildi':'Reddedildi','atlandi':'Başka değer seçildi'}[f.status] }}</td>
+          <td class="small nowrap" style="width:120px">{{ {'bilgi':'Bilgi','oneri':'Onay bekliyor','onaylandi':'Uygulandı','reddedildi':'Reddedildi','atlandi':'Başka değer seçildi'}[f.status] }}{% if f.status in ('oneri', 'bilgi') %} {{ fact_edit(f) }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
-      {% if items|selectattr('status','equalto','oneri')|list %}<div class="row" style="margin:6px 0 0"><button class="btn primary sm" name="action" value="onayla">Seçilenleri projeye uygula</button><button class="btn ghost sm" name="action" value="reddet">Reddet</button></div>{% endif %}
-      </form>
+      {% if items|selectattr('status','equalto','oneri')|list %}<div class="row" style="margin:6px 0 0"><button form="bulk-{{ code }}" class="btn primary sm" name="action" value="onayla">Seçilenleri projeye uygula</button><button form="bulk-{{ code }}" class="btn ghost sm" name="action" value="reddet">Reddet</button></div>{% endif %}
       {% else %}<div class="empty">{{ 'Bilgi çıkarılmadı.' if d.status == 'islendi' else 'İşlem bekleniyor.' }}</div>{% endfor %}
     </div>
     <div class="card">

@@ -59,7 +59,7 @@ Yalnızca sunucudaki **`.env`** dosyası. Kod değişikliği gerekmez.
 
 | Değişken | Ne yazılır | Örnek |
 |---|---|---|
-| `AI_PROVIDER` | Uç noktanın tipi | `openai` (OpenAI uyumlu gateway / vLLM / LiteLLM) · `azure` · `anthropic` |
+| `AI_PROVIDER` | Uç noktanın tipi — `auto` bırakırsanız adresten algılanır | `auto` · `openai` (OpenAI uyumlu gateway / vLLM / LiteLLM) · `azure` · `anthropic` |
 | `AI_BASE_URL` | Uç noktanın kök adresi | `https://ai-gateway.dogus.local/v1` — **`/chat/completions` yazmayın**, uygulama ekler |
 | `AI_API_KEY` | API anahtarı | `sk-...` |
 | `AI_MODEL` | Model adı (Azure'da *deployment* adı) | `gpt-4o`, `claude-…`, `llama-3.1-70b` |
@@ -68,9 +68,10 @@ Yalnızca sunucudaki **`.env`** dosyası. Kod değişikliği gerekmez.
 | `AI_MAX_CONTEXT_CHARS` | Tek çağrıdaki en fazla metin | 128K token model: `200000` · 32K: `60000` |
 
 3. Uygulamayı yeniden başlatın: `docker compose up -d` (Docker'sızsa servisi yeniden başlatın).
-4. **Ayarlar → AI bağlantısı → Bağlantıyı test et**. Yeşil mesaj görürseniz hazırsınız. Sol menünün altındaki gösterge
+4. **Ayarlar → AI bağlantısı → Bağlantıyı test et**. Sayfanın üstünde "AI bağlı değil" uyarısı görüyorsanız `.env` okunmamıştır
+   (dosya adı tam olarak `.env` mi, proje kök klasöründe mi, uygulamayı yeniden başlattınız mı?). Yeşil mesaj görürseniz hazırsınız. Sol menünün altındaki gösterge
    "Demo modu" yerine sağlayıcı ve model adını gösterir.
-5. Demo verisini kural tabanlı modda işlediyseniz: **Ayarlar → Tüm dokümanları yeniden işle** (onaylı bilgiler korunur).
+5. AI bağlanmadan önce yüklenmiş dokümanlar Ayarlar'da listelenir: **Bu dokümanları yeniden işle** ile gerçek modelden geçirin (onaylı bilgiler korunur).
 
 Uygulama standart istekleri gönderir:
 - `openai`: `POST {AI_BASE_URL}/chat/completions`, `Authorization: Bearer <anahtar>`, JSON modu (`response_format`) — desteklenmezse otomatik olarak düz moda düşer.
@@ -92,6 +93,18 @@ Sunucunun çıkışında kurumsal proxy varsa `HTTPS_PROXY` / `NO_PROXY` ortam d
 - Doluluk ve boş alan: **Ayarlar → Doküman deposu**.
 - Desteklenen türler: docx, doc*, pdf, pptx, ppt*, xlsx, xls*, csv, txt, md, eml, html, rtf*, odt*. (*LibreOffice ile dönüştürülür; Docker imajında hazır gelir.)
   Taranmış (görüntü) PDF'lerde metin çıkmaz; doküman "metin yok" olarak işaretlenir.
+
+## İlk kurulum: demo verisini kaldırıp Trello'yu aktarmak
+
+1. **Ayarlar → Demo verisi → Demo verisini temizle.** Yalnızca örnek kayıtlar silinir, demo bir daha yüklenmez.
+2. **Ayarlar → Trello'dan aktar.** Trello'da *Menü → Yazdır, dışa aktar ve paylaş → JSON olarak dışa aktar* ile indirdiğiniz dosyayı seçin, **Önizle**.
+3. Önizlemede listelerin aşamalarını (ör. *AI Champion* → Aktarma) ve kart adındaki birimlerin departmanlarını (ör. *YP Lojistik* → Yedek Parça & Lojistik,
+   *VW Binek* → marka) kontrol edin, **Aktar**. UC kodları proje kodu olur; liste geçmişi tarihçeye, yorumlar ve checklist'ler projelere taşınır.
+   Aynı dosyayı sonra tekrar yüklerseniz projeler güncellenir, kopya oluşmaz.
+4. Dokümanları yükleyin. Dokümanda UC kodu ya da proje adı geçtiğinde otomatik eşleşir; geçmiyorsa proje sayfasında **Diğer adlar** alanına
+   dokümanlarda kullanılan adı ekleyip dokümanı yeniden işleyin.
+
+Her şeyi silip baştan başlamak için: **Ayarlar → Tüm verileri sıfırla** (kullanıcılar ve departmanlar korunur).
 
 ## Giriş ekranı
 

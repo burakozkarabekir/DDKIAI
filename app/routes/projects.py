@@ -68,7 +68,7 @@ def timeline_page(request: Request, departman: str = "", stage: str = "", yil: s
 
 # ------------------------------------------------------------------ projeler
 
-PROJECT_FIELDS = ["name", "aliases", "summary", "problem", "solution", "business_unit", "brands", "ai_type", "health", "priority",
+PROJECT_FIELDS = ["name", "aliases", "tags", "summary", "problem", "solution", "business_unit", "brands", "ai_type", "health", "priority",
                   "sponsor", "owner", "dt_lead", "start_date", "target_date", "golive_date", "measurement_status", "estimated_value",
                   "realized_value", "fte_saving", "security_review", "data_class"]
 NUMERIC = {"estimated_value", "realized_value", "fte_saving"}
@@ -170,8 +170,15 @@ def project_edit(request: Request, pid: int, user=Depends(require_editor)):
 
 @router.post("/projeler/{pid}")
 async def project_update(request: Request, pid: int, user=Depends(require_editor)):
-    get_project(pid, user)
-    data = _project_data(await request.form())
+    p = get_project(pid, user)
+    form = await request.form()
+    data = _project_data(form)
+    code = str(form.get("code") or "").strip().upper()
+    if code and code != p["code"]:
+        if db.scalar("SELECT 1 FROM projects WHERE code = ? AND id != ?", (code, pid)):
+            flash(request, f"{code} kodu başka bir projede kullanılıyor; kod değiştirilmedi.", "warn")
+        else:
+            data["code"] = code[:20]
     data["updated_at"] = db.now()
     db.update("projects", pid, data)
     db.log(user["id"], "project_updated", "project", pid)
@@ -255,12 +262,19 @@ def kpi_add(request: Request, pid: int, name: str = Form(...), unit: str = Form(
 
 @router.post("/kpi/{kid}")
 def kpi_update(request: Request, kid: int, baseline: str = Form(""), target: str = Form(""), actual: str = Form(""),
-               method: str = Form(""), user=Depends(require_uploader)):
+               method: str = Form(""), name: str = Form(""), unit: str = Form(None), direction: str = Form(""),
+               user=Depends(require_uploader)):
     k = db.row("SELECT * FROM kpis WHERE id = ?", (kid,))
     if not k:
         raise HTTPException(404, "KPI bulunamadı")
     get_project(k["project_id"], user)
     data = {"baseline": parse_float(baseline), "target": parse_float(target), "actual": parse_float(actual), "method": method or None}
+    if name.strip():
+        data["name"] = name.strip()[:200]
+    if unit is not None:
+        data["unit"] = unit.strip() or None
+    if direction in ("up", "down"):
+        data["direction"] = direction
     if data["actual"] != k["actual"]:
         data["measured_at"] = date.today().isoformat()
     db.update("kpis", kid, data)
@@ -296,6 +310,21 @@ def action_toggle(request: Request, aid: int, user=Depends(require_uploader)):
     new = "kapali" if a["status"] == "acik" else "acik"
     db.update("actions", aid, {"status": new, "closed_at": db.now() if new == "kapali" else None})
     db.log(user["id"], "action_" + new, "project", a["project_id"], a["title"])
+    return back(request)
+
+
+@router.post("/aksiyon/{aid}/duzenle")
+def action_edit(request: Request, aid: int, title: str = Form(...), owner: str = Form(""), due_date: str = Form(""),
+                user=Depends(require_editor)):
+    if not db.row("SELECT 1 FROM actions WHERE id = ?", (aid,)):
+        raise HTTPException(404, "Aksiyon bulunamadı")
+    db.update("actions", aid, {"title": title.strip()[:300], "owner": owner.strip() or None, "due_date": due_date or None})
+    return back(request)
+
+
+@router.post("/aksiyon/{aid}/sil")
+def action_delete(request: Request, aid: int, user=Depends(require_editor)):
+    db.execute("DELETE FROM actions WHERE id = ?", (aid,))
     return back(request)
 
 
@@ -341,6 +370,14 @@ def comment_add(request: Request, target_type: str = Form(...), target_id: int =
     db.insert("comments", {"target_type": target_type, "target_id": target_id, "user_id": user["id"], "body": body[:10000],
                            "created_at": db.now()})
     db.log(user["id"], "comment_added", target_type, target_id, body[:80])
+    return back(request)
+
+
+@router.post("/yorum/{cid}/duzenle")
+def comment_edit(request: Request, cid: int, body: str = Form(...), user=Depends(require_user)):
+    c = db.row("SELECT * FROM comments WHERE id = ?", (cid,))
+    if c and body.strip() and (c["user_id"] == user["id"] or user["role"] == "admin"):
+        db.update("comments", cid, {"body": body.strip()[:10000]})
     return back(request)
 
 

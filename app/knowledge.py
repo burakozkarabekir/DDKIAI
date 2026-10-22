@@ -8,6 +8,7 @@ Veri akışı
     facts ─► bilgi akışı (salt bilgi) | inceleme kuyruğu (proje alanını değiştiren öneriler) ─► onay ─► proje
 """
 import json
+import math
 import re
 from datetime import date
 
@@ -27,19 +28,42 @@ def norm(s: str) -> str:
 
 # ---------------------------------------------------------------- proje eşleştirme
 
+_GENERIC = {norm(w) for w in (
+    "assistant asistan asistanı asistani agent ajan platform platformu analyzer analizi analiz generator dashboard system sistemi "
+    "faz phase intelligent insights optimization optimizasyon optimizasyonu management yönetimi yonetimi engine tool and for the ile "
+    "için icin projesi proje ve & de da".split())}
+
+
+def _tokens(s: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]{4,}", re.sub(r"faz\s*(\d)", r"faz\1", norm(s))) if t not in _GENERIC}
+
+
+def _base(code: str) -> str:
+    return re.sub(r"(-F\d|-\d+)$", "", code)
+
+
 def catalog() -> list[dict]:
-    """Eşleştirme için proje kataloğu: kod, ad ve takma adlar (normalize edilmiş)."""
+    """Eşleştirme için proje kataloğu: kod kalıbı, ad ve takma adlar (normalize), anlamlı kelimeler."""
     out = []
     for p in db.rows("SELECT id, code, name, aliases FROM projects"):
         names = [p["name"]] + [a.strip() for a in (p["aliases"] or "").split(",") if a.strip()]
-        num = re.sub(r"\D", "", p["code"])
+        codes = [p["code"]] + [a for a in names if re.fullmatch(r"[A-Za-z]{1,5}[-\s_]?\d{1,4}", a.strip())]
+        patterns = []
+        for c in codes:
+            m = re.match(r"([A-Za-z]{1,5})[-\s_]?0*(\d{1,4})(?:-F(\d))?", c.strip())
+            if m:
+                pat = rf"\b{m.group(1)}[\s\-_]?0*{int(m.group(2))}\b"
+                if m.group(3):  # fazlı kod (UC57-F2): "UC57 ... Faz 2" de eşleşsin
+                    pat = rf"\b{m.group(1)}[\s\-_]?0*{int(m.group(2))}\b(?=[^\n]{{0,80}}faz\s*{m.group(3)})"
+                patterns.append(pat)
         out.append({"id": p["id"], "code": p["code"], "name": p["name"],
-                    "code_re": re.compile(rf"\b{re.escape(p['code'].split('-')[0])}[\s\-_]?0*{int(num) if num else ''}\b", re.I) if num else None,
-                    "names": [norm(n) for n in names if len(norm(n)) >= 6]})
+                    "code_re": re.compile("|".join(patterns), re.I) if patterns else None,
+                    "names": [norm(n) for n in names if len(norm(n)) >= 6],
+                    "tokens": [t for t in (_tokens(n) for n in names) if len(t) >= 2]})
     return out
 
 
-def mentions(text: str, cat: list[dict] | None = None) -> dict[int, dict]:
+def mentions(text: str, cat: list[dict] | None = None, fuzzy: bool = True) -> dict[int, dict]:
     """Metinde geçen projeler: {project_id: {"count": n, "method": "kod"|"isim", "first": konum}}"""
     cat = cat if cat is not None else catalog()
     low = norm(text)
@@ -54,19 +78,34 @@ def mentions(text: str, cat: list[dict] | None = None) -> dict[int, dict]:
             if i != -1:
                 found[p["id"]] = {"count": low.count(n), "method": "isim", "first": i}
                 break
+    if fuzzy:
+        words = _tokens(low)
+        coded = {_base(p["code"]) for p in cat if found.get(p["id"], {}).get("method") == "kod"}
+        for p in cat:
+            if p["id"] in found or _base(p["code"]) in coded:
+                continue
+            for toks in p["tokens"]:
+                hit = toks & words
+                if len(hit) >= max(2, math.ceil(0.7 * len(toks))):
+                    first = min(low.find(t) for t in hit)
+                    found[p["id"]] = {"count": 1, "method": "isim", "first": first, "fuzzy": True}
+                    break
     return found
 
 
 def _line_project(line: str, cat: list[dict]) -> int | None:
-    """Satır bir proje başlığı gibi mi başlıyor? (DT raporlarında her proje bölümü kod/ad ile başlar)"""
-    head = line.strip()[:120]
+    """Satır bir proje bölümünü mü başlatıyor? (proje kodu/adı satır başında ya da bir tablo satırında geçiyorsa)"""
+    head = line.strip()
     if not head:
         return None
-    m = mentions(head, cat)
+    is_row = " | " in head
+    m = mentions(head if is_row else head[:160], cat, fuzzy=is_row or len(head) <= 120)
     if not m:
         return None
     pid, info = min(m.items(), key=lambda kv: kv[1]["first"])
-    return pid if info["first"] <= 12 else None
+    if is_row:
+        return pid if len(m) == 1 or info["method"] == "kod" else None
+    return pid if info["first"] <= 25 else None
 
 
 def segment(sections: list[tuple[str, str]], cat: list[dict]) -> list[tuple[str, str, int | None]]:
@@ -113,7 +152,10 @@ def index_document(doc_id: int, sections: list[tuple[str, str]]) -> dict[int, di
     """Parçaları yeniden oluşturur, proje bağlarını (kod/isim) günceller. Dönüş: bulunan projeler."""
     cat = catalog()
     pieces = chunk(segment(sections, cat))
-    found = mentions("\n".join(f"{h}\n{t}" for h, t in sections), cat)
+    found = mentions("\n".join(f"{h}\n{t}" for h, t in sections), cat, fuzzy=False)
+    for h, t, pid in pieces:  # parçalarda bulunan (tablo satırı, bulanık eşleşme) projeleri de say
+        if pid and pid not in found:
+            found[pid] = {"count": 1, "method": "isim", "first": 0}
     manual = [r["project_id"] for r in db.rows("SELECT project_id FROM document_links WHERE document_id = ? AND method = 'manuel'", (doc_id,))]
     # Tek projelik dokümanlarda (PDD, kazanım dokümanı…) proje adı geçmeyen bölümler de o projeye aittir.
     total = sum(v["count"] for v in found.values())

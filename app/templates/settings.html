@@ -4,6 +4,51 @@
 {% block content %}
 <div class="page-head"><div><h1>Ayarlar</h1></div></div>
 
+{% if not ai_live() %}
+<div class="flash warn" style="margin-bottom:16px"><b>AI bağlı değil — uygulama demo (kural tabanlı) modunda.</b>
+  Dokümanlar okunur ve indekslenir ama yorumlama sınırlı kalır. <code>.env</code> dosyasında <code>AI_BASE_URL</code>, <code>AI_API_KEY</code> ve <code>AI_MODEL</code> satırlarını doldurup
+  uygulamayı yeniden başlatın (terminalde Ctrl+C, sonra <code>uvicorn app.main:app --reload</code>). <a href="#ai">Ayrıntılar ↓</a></div>
+{% elif mock_docs %}
+<div class="flash warn" style="margin-bottom:16px"><b>{{ mock_docs }} doküman AI bağlanmadan (demo modunda) işlenmiş.</b> Gerçek model ile yeniden işleyin:
+  <form method="post" action="/ayarlar/yeniden-isle" style="display:inline"><input type="hidden" name="sadece" value="mock"><button class="btn primary sm">Bu dokümanları yeniden işle</button></form></div>
+{% endif %}
+
+{% if preview %}
+<div class="card" id="trello-onizleme" style="margin-bottom:16px">
+  <h2>Trello aktarımı · {{ preview.board }}</h2>
+  <p class="small">{{ preview.card_count }} açık kart · {{ preview.moves }} liste değişikliği · {{ preview.comments }} yorum{% if preview.existing %} · <b>{{ preview.existing }} kart daha önce aktarılmış</b>{% endif %}.
+    Listelerin aşamasını ve birimlerin departmanını kontrol edip <b>Aktar</b>'a basın.</p>
+  <form method="post" action="/ayarlar/trello/aktar">
+    <div class="grid g2">
+      <div>
+        <h3>Listeler → aşama</h3>
+        <table><thead><tr><th>Trello listesi</th><th class="num">Kart</th><th>Aşama</th></tr></thead><tbody>
+        {% for l in preview.lists %}<tr><td>{{ l.name }}</td><td class="num">{{ l.count }}</td><td><select name="stage_{{ l.id }}">
+          <option value="atla" {{ 'selected' if l.stage == 'atla' }}>— Aktarma —</option>
+          {% for k, lab, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if k == l.stage }}>{{ lab }}</option>{% endfor %}</select></td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+      <div>
+        <h3>Kart adındaki birim → departman / marka</h3>
+        <table><thead><tr><th>Birim</th><th class="num">Kart</th><th>Eşleme</th></tr></thead><tbody>
+        {% for u in preview.units %}<tr><td>{{ u.name }}</td><td class="num">{{ u.count }}</td><td><select name="unit_{{ u.name }}">
+          <option value="">— Boş bırak —</option>
+          <option value="marka" {{ 'selected' if u.kind == 'brand' }}>Marka olarak yaz</option>
+          <option value="yeni" {{ 'selected' if u.kind == 'new' }}>Yeni departman: {{ u.name }}</option>
+          {% for d in deps %}<option value="{{ d.id }}" {{ 'selected' if u.kind == 'dept' and u.dept == d.name }}>{{ d.name }}</option>{% endfor %}
+        </select></td></tr>{% else %}<tr><td colspan="3" class="muted small">Kart adlarında birim bulunamadı.</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+    {% if preview.duplicates %}
+    <div class="callout small" style="margin-top:12px"><b>Aynı UC koduna sahip birden fazla kart var.</b> En ileri aşamadaki kart asıl kodu alır, diğerleri <code>-2</code>, fazlı olanlar <code>-F2</code> gibi ek alır. Gerekirse aktarımdan sonra birleştirebilir ya da silebilirsiniz:
+      <ul style="margin:6px 0 0">{% for code, names in preview.duplicates.items() %}<li><b>{{ code }}</b>: {{ names|join(' · ') }}</li>{% endfor %}</ul></div>{% endif %}
+    <label class="row small" style="margin-top:12px;font-weight:500"><input type="checkbox" name="update_existing" value="1" checked> Daha önce aktarılmış kartları güncelle (ad, aşama, hedef tarih, etiket, sorumlu; elle girdiğiniz diğer alanlar korunur)</label>
+    <div class="row" style="margin-top:12px"><button class="btn primary">Aktar</button><a class="btn ghost" href="/ayarlar">Vazgeç</a></div>
+  </form>
+</div>
+{% endif %}
+
 <div class="grid g-main">
   <div class="card" id="departmanlar">
     <div class="card-head"><h2>Departmanlar</h2><span class="muted small">Projeler departmanlara atanır; kapsama haritası ve boşluk analizi bu listeye göre yapılır.</span></div>
@@ -47,7 +92,7 @@
       <h2>AI bağlantısı</h2>
       <p class="small">Durum: <b>{{ ai_label() }}</b></p>
       <table class="small kv">
-        <tr><td class="muted">AI_PROVIDER</td><td><code>{{ ai_cfg.provider }}</code></td></tr>
+        <tr><td class="muted">AI_PROVIDER</td><td><code>{{ ai_cfg.provider }}</code>{% if provider_set != ai_cfg.provider %} <span class="muted">(.env: {{ provider_set }}{{ ', adresten algılandı' if ai_live() }})</span>{% endif %}</td></tr>
         <tr><td class="muted">AI_BASE_URL</td><td><code>{{ ai_cfg.base_url }}</code></td></tr>
         <tr><td class="muted">AI_MODEL</td><td><code>{{ ai_cfg.model }}</code></td></tr>
         <tr><td class="muted">AI_API_KEY</td><td><code>{{ ai_cfg.key }}</code></td></tr>
@@ -70,14 +115,37 @@
         {% if docs.notext %}<tr><td class="muted">Metin çıkmayan</td><td>{{ docs.notext }} doküman (taranmış PDF / görsel olabilir)</td></tr>{% endif %}
       </table>
     </div>
+    <div class="card" id="trello">
+      <h2>Trello'dan aktar</h2>
+      <p class="small">Trello panosunda <b>Menü → Yazdır, dışa aktar ve paylaş → JSON olarak dışa aktar</b>. Kartlar proje, listeler aşama olur; UC kodları, birimler, tarihler,
+        liste geçmişi, yorumlar ve checklist'ler taşınır. Aynı dosyayı tekrar yüklemek mevcut projeleri günceller, tekrar oluşturmaz.</p>
+      <form method="post" action="/ayarlar/trello/onizle" enctype="multipart/form-data" class="row"><input type="file" name="file" accept=".json" required style="flex:1"><button class="btn primary sm">Önizle</button></form>
+    </div>
+    {% if demo %}
+    <div class="card" id="demo">
+      <h2>Demo verisi</h2>
+      <p class="small">Uygulamada örnek (demo) projeler, dokümanlar, girişimler ve AI Security metrikleri var. Silmek yalnızca demo kayıtlarını kaldırır;
+        sizin eklediğiniz proje ve dokümanlar korunur. Silindikten sonra demo bir daha yüklenmez.</p>
+      <form method="post" action="/ayarlar/demo-temizle" data-confirm="Demo projeler, dokümanlar, girişimler, metrikler ve yorumlar silinecek. Devam?"><button class="btn primary sm">Demo verisini temizle</button></form>
+    </div>
+    {% endif %}
     <div class="card" id="kuyruk">
       <h2>İşleme kuyruğu</h2>
       <p class="small">Bekleyen: <b>{{ queue.waiting }}</b> · çalışan: <b>{{ queue.running }}</b> · hatalı: <b>{{ queue.failed }}</b></p>
       {% for j in failed_jobs %}<div class="small row" style="margin-bottom:6px"><span class="code">{{ j.kind }} #{{ j.ref_id or '' }}</span><span class="muted">{{ j.error|truncate(90) }}</span><span class="spacer"></span>
         <form method="post" action="/ayarlar/is/{{ j.id }}/tekrar"><button class="btn sm">Tekrar dene</button></form></div>{% endfor %}
-      {% if user.role == 'admin' %}<form method="post" action="/ayarlar/yeniden-isle" data-confirm="Tüm dokümanlar yeniden işlenecek (AI bağlantısı kurulduktan sonra önerilir). Onaylanmış bilgiler korunur. Devam?">
-        <button class="btn sm">Tüm dokümanları yeniden işle</button></form>{% endif %}
+      <form method="post" action="/ayarlar/yeniden-isle" data-confirm="Tüm dokümanlar yeniden işlenecek (AI bağlantısı kurulduktan sonra önerilir). Onaylanmış bilgiler korunur. Devam?">
+        <button class="btn sm">Tüm dokümanları yeniden işle</button></form>
     </div>
+    {% if user.role == 'admin' %}
+    <div class="card" id="tehlike" style="border-color:var(--critical)">
+      <h2>Tüm verileri sıfırla</h2>
+      <p class="small">Projeler, dokümanlar (dosyalar dahil), çıkarılan bilgiler, aksiyonlar, yorumlar, AI Security verileri ve AI içgörüleri silinir.
+        Kullanıcılar ve departmanlar korunur. <b>Geri alınamaz.</b></p>
+      <form method="post" action="/ayarlar/sifirla" class="row" data-confirm="TÜM veriler silinecek. Emin misiniz?">
+        <input name="confirm" placeholder="Onay için SİL yazın" style="flex:1"><button class="btn danger sm">Sıfırla</button></form>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

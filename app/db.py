@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS projects (
     code TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     aliases TEXT,                      -- dokümanlarda geçen diğer adlar (virgülle); proje eşleştirmede kullanılır
+    tags TEXT,                         -- etiketler (virgülle), ör. Trello etiketleri: 3rd Party Firma, Dependent
     summary TEXT,
     problem TEXT,
     solution TEXT,
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS documents (
     text_content TEXT,
     summary TEXT,
     status TEXT NOT NULL DEFAULT 'sirada',          -- sirada | isleniyor | islendi | metin_yok | hata
+    ai_mode TEXT,                                   -- işlendiği mod: live (gerçek model) | mock (demo)
     error TEXT,
     initiative_id INTEGER REFERENCES initiatives(id) ON DELETE CASCADE,
     uploaded_by INTEGER REFERENCES users(id),
@@ -252,6 +254,11 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
@@ -265,7 +272,8 @@ CREATE TABLE IF NOT EXISTS activity (
 
 # v1 veritabanlarında eksik kalan sütunlar (başlangıçta otomatik eklenir)
 MIGRATIONS = {
-    "projects": {"aliases": "TEXT", "department_id": "INTEGER REFERENCES departments(id) ON DELETE SET NULL"},
+    "projects": {"aliases": "TEXT", "tags": "TEXT", "department_id": "INTEGER REFERENCES departments(id) ON DELETE SET NULL"},
+    "documents": {"ai_mode": "TEXT"},
     "ai_insights": {"project_id": "INTEGER", "source_document_id": "INTEGER"},
     "actions": {"source_document_id": "INTEGER"},
 }
@@ -346,6 +354,15 @@ def update(table: str, id_: int, data: dict) -> None:
         return
     sets = ", ".join(f"{k} = ?" for k in data)
     execute(f"UPDATE {table} SET {sets} WHERE id = ?", (*data.values(), id_))
+
+
+def setting(key: str, default: str | None = None) -> str | None:
+    v = scalar("SELECT value FROM settings WHERE key = ?", (key,))
+    return default if v is None else v
+
+
+def set_setting(key: str, value: str) -> None:
+    execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
 
 def log(user_id: int | None, action: str, target_type: str | None = None, target_id: int | None = None, detail: str = "") -> None:

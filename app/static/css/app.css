@@ -398,3 +398,12 @@ table.kv td { padding: 5px 8px; }
   .shell { display: block; }
   body { background: #fff; }
 }
+
+/* ---------- v2.1: düzenleme açılır kutuları, etiketler */
+details.edit { position: relative; display: inline-block; }
+details.edit > summary { list-style: none; }
+details.edit > summary::-webkit-details-marker { display: none; }
+details.edit .popover { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; width: 320px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.14); text-align: left; white-space: normal; }
+.badge.tag { background: #f1ecfd; color: #5b45c9; border-color: transparent; font-weight: 600; }
+:root[data-theme="dark"] .badge.tag { background: var(--surface-2); color: var(--ink-2); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge.tag { background: var(--surface-2); color: var(--ink-2); } }

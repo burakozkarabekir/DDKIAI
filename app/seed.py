@@ -266,9 +266,94 @@ def _add_doc(filename: str, data: bytes, doc_type: str | None, source: str, doc_
     return did
 
 
+DEMO_COMMENTS = [
+    ("project", "AI-003", "executive", "ERP erişimi neden 2 haftadır bekliyor? Bu hafta sonuna kadar çözülsün, gerekirse bana eskale edin."),
+    ("project", "AI-005", None, "Canlıya çıktı ama baseline yok. Ölçüm planını önümüzdeki komitede netleştirelim."),
+    ("project", "AI-001", "viewer", "Servis ekiplerinden çok olumlu geri bildirim var. Porsche servislerine de genişletebilir miyiz?"),
+    ("initiative", 2, "executive", "Shadow AI kullanıcı sayısı düşüyor, güzel. Hangi birimler hâlâ en çok kullanıyor?"),
+    ("initiative", 1, None, "Finans onboarding tamamlandı. Sırada İK ve Hukuk var."),
+]
+DEMO_FILES = ["DDE İç Değerlendirme Notları.docx", "AI-002 PDD.docx", "AI-001 Kazanım Raporu Q3.xlsx"]
+
+
+def demo_present() -> bool:
+    if db.setting("demo_loaded") == "1":
+        return True
+    return bool(db.scalar("SELECT 1 FROM projects WHERE trello_id IS NULL AND code = 'AI-001' AND name = ?", (PROJECTS[0][1],)))
+
+
+def clear_demo(user_id: int | None = None) -> dict:
+    """Yalnızca demo kayıtlarını siler; kullanıcının eklediği proje, doküman ve metrikler korunur."""
+    from .storage import path_of
+    stats = {}
+    codes = [p[0] for p in PROJECTS]
+    demo_pids = [r["id"] for r in db.rows(
+        f"SELECT id FROM projects WHERE trello_id IS NULL AND code IN ({','.join('?' * len(codes))}) AND name IN ({','.join('?' * len(codes))})",
+        tuple(codes) + tuple(p[1] for p in PROJECTS))]
+    docs = db.rows("SELECT id, storage_path, sha256 FROM documents WHERE filename IN ({}) OR filename LIKE 'DT Haftalık Durum Raporu 20__-__-__.%'"
+                   .format(",".join("?" * len(DEMO_FILES))), tuple(DEMO_FILES))
+    for d in docs:
+        db.execute("DELETE FROM documents WHERE id = ?", (d["id"],))
+        p = path_of(d["storage_path"])
+        if p and not db.scalar("SELECT 1 FROM documents WHERE sha256 = ?", (d["sha256"],)):
+            p.unlink(missing_ok=True)
+    stats["doküman"] = len(docs)
+    if demo_pids:
+        marks = ",".join("?" * len(demo_pids))
+        db.execute(f"DELETE FROM comments WHERE target_type = 'project' AND target_id IN ({marks})", tuple(demo_pids))
+        db.execute(f"DELETE FROM projects WHERE id IN ({marks})", tuple(demo_pids))
+    stats["proje"] = len(demo_pids)
+    for _t, _ref, _role, body in DEMO_COMMENTS:
+        db.execute("DELETE FROM comments WHERE body = ?", (body,))
+    slugs = [i[0] for i in INITIATIVES]
+    demo_inits = [r["id"] for r in db.rows(f"SELECT id FROM initiatives WHERE slug IN ({','.join('?' * len(slugs))})", tuple(slugs))]
+    # Demo girişimlerine kullanıcı yorum/doküman eklediyse girişimi koru
+    keep = {r["target_id"] for r in db.rows("SELECT DISTINCT target_id FROM comments WHERE target_type = 'initiative'")}
+    keep |= {r["initiative_id"] for r in db.rows("SELECT DISTINCT initiative_id FROM documents WHERE initiative_id IS NOT NULL")}
+    for iid in demo_inits:
+        if iid not in keep:
+            db.execute("DELETE FROM initiatives WHERE id = ?", (iid,))
+    stats["girişim"] = len([i for i in demo_inits if i not in keep])
+    # Demo metrikleri: değeri demo serisiyle birebir aynı olan kayıtlar (kullanıcının girdiği değerler korunur)
+    for metric, vals in DEMO_TRENDS.items():
+        for v in vals:
+            db.execute("DELETE FROM security_metrics WHERE metric = ? AND value = ? AND note IS NULL", (metric, v))
+    db.execute("DELETE FROM ai_insights WHERE project_id IS NULL OR project_id NOT IN (SELECT id FROM projects)")
+    db.execute("DELETE FROM chat_messages")
+    db.execute("DELETE FROM jobs WHERE status IN ('tamam', 'hata')")
+    demo_users = [r["id"] for r in db.rows("SELECT id FROM users WHERE email LIKE '%@demo.local' AND role != 'admin'")]
+    for uid in demo_users:
+        if not db.scalar("SELECT 1 FROM comments WHERE user_id = ?", (uid,)):
+            db.execute("DELETE FROM users WHERE id = ?", (uid,))
+        else:
+            db.execute("UPDATE users SET active = 0 WHERE id = ?", (uid,))
+    for name, pain in PAIN_POINTS.items():
+        db.execute("UPDATE departments SET pain_points = NULL WHERE name = ? AND pain_points = ?", (name, pain))
+    db.set_setting("demo_loaded", "0")
+    db.set_setting("demo_cleared", "1")
+    db.log(user_id, "demo_cleared", detail=str(stats))
+    return stats
+
+
+def reset_all(user_id: int | None = None) -> None:
+    """Kullanıcılar ve departmanlar dışındaki tüm verileri siler (dosyalar dahil)."""
+    from .config import STORAGE_DIR
+    for table in ("facts", "chunks", "document_links", "documents", "kpis", "stage_history", "actions", "comments", "ai_insights",
+                  "chat_messages", "jobs", "security_metrics", "initiatives", "projects", "activity"):
+        db.execute(f"DELETE FROM {table}")
+    db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
+    for f in STORAGE_DIR.rglob("*"):
+        if f.is_file():
+            f.unlink(missing_ok=True)
+    db.set_setting("demo_loaded", "0")
+    db.set_setting("demo_cleared", "1")
+    db.log(user_id, "reset_all")
+
+
 def seed_demo() -> None:
-    if db.scalar("SELECT COUNT(*) FROM projects"):
+    if db.scalar("SELECT COUNT(*) FROM projects") or db.setting("demo_cleared") == "1":
         return
+    db.set_setting("demo_loaded", "1")
     team_id = db.scalar("SELECT id FROM users WHERE email = ?", (TEAM_EMAIL,))
     ids = {}
     for email, name, role, title, org in USERS:
@@ -330,11 +415,8 @@ def seed_demo() -> None:
     _add_doc("AI-001 Kazanım Raporu Q3.xlsx", _xlsx_bytes(BENEFIT_AI001), "kazanim", "İş Birimi", _d(-10), team_id)
     pipeline.drain()
 
-    comments = [("project", pids["AI-003"], ids.get("executive"), "ERP erişimi neden 2 haftadır bekliyor? Bu hafta sonuna kadar çözülsün, gerekirse bana eskale edin."),
-                ("project", pids["AI-005"], team_id, "Canlıya çıktı ama baseline yok. Ölçüm planını önümüzdeki komitede netleştirelim."),
-                ("project", pids["AI-001"], ids.get("viewer"), "Servis ekiplerinden çok olumlu geri bildirim var. Porsche servislerine de genişletebilir miyiz?"),
-                ("initiative", 2, ids.get("executive"), "Shadow AI kullanıcı sayısı düşüyor, güzel. Hangi birimler hâlâ en çok kullanıyor?"),
-                ("initiative", 1, team_id, "Finans onboarding tamamlandı. Sırada İK ve Hukuk var.")]
+    comments = [(t, {"AI-003": pids["AI-003"], "AI-005": pids["AI-005"], "AI-001": pids["AI-001"]}.get(ref, ref), ids.get(role) if role else team_id, body)
+                for t, ref, role, body in DEMO_COMMENTS]
     for t, tid, uid, body in comments:
         db.insert("comments", {"target_type": t, "target_id": tid, "user_id": uid or team_id, "body": body, "created_at": _ts(-3)})
     pipeline.enqueue("gap")
@@ -342,7 +424,7 @@ def seed_demo() -> None:
     db.log(team_id, "seed", detail="Demo verisi yüklendi")
 
 
-def _seed_security() -> None:
+def _demo_months() -> list[str]:
     base = date.today().replace(day=1)
     months = []
     for i in range(8, -1, -1):
@@ -351,19 +433,25 @@ def _seed_security() -> None:
             m += 12
             y -= 1
         months.append(f"{y}-{m:02d}")
-    trends = {
-        "ai_studio_active_users": [120, 260, 410, 560, 690, 810, 930, 1040, 1120],
-        "ai_studio_prompts": [3_100, 8_400, 15_200, 22_800, 29_500, 36_100, 44_700, 51_900, 58_300],
-        "ai_studio_use_cases": [3, 7, 12, 17, 22, 27, 32, 37, 41],
-        "shadow_ai_apps": [64, 61, 55, 49, 47, 41, 38, 36, 33],
-        "shadow_ai_users": [890, 850, 760, 690, 640, 560, 520, 470, 430],
-        "shadow_ai_blocked": [0, 0, 1_200, 2_600, 2_350, 2_100, 1_850, 1_600, 1_420],
-        "dlp_incidents": [14, 19, 22, 17, 15, 18, 12, 10, 9],
-        "sensitive_prompts_blocked": [40, 85, 130, 150, 160, 145, 150, 138, 126],
-        "policy_ack_rate": [12, 35, 58, 70, 78, 83, 87, 90, 92],
-        "training_completion": [0, 8, 21, 34, 45, 52, 60, 66, 71],
-        "projects_security_reviewed": [30, 33, 40, 45, 50, 55, 58, 60, 62],
-    }
-    for metric, vals in trends.items():
-        for per, v in zip(months, vals):
+    return months
+
+
+DEMO_TRENDS = {
+    "ai_studio_active_users": [120, 260, 410, 560, 690, 810, 930, 1040, 1120],
+    "ai_studio_prompts": [3_100, 8_400, 15_200, 22_800, 29_500, 36_100, 44_700, 51_900, 58_300],
+    "ai_studio_use_cases": [3, 7, 12, 17, 22, 27, 32, 37, 41],
+    "shadow_ai_apps": [64, 61, 55, 49, 47, 41, 38, 36, 33],
+    "shadow_ai_users": [890, 850, 760, 690, 640, 560, 520, 470, 430],
+    "shadow_ai_blocked": [0, 0, 1_200, 2_600, 2_350, 2_100, 1_850, 1_600, 1_420],
+    "dlp_incidents": [14, 19, 22, 17, 15, 18, 12, 10, 9],
+    "sensitive_prompts_blocked": [40, 85, 130, 150, 160, 145, 150, 138, 126],
+    "policy_ack_rate": [12, 35, 58, 70, 78, 83, 87, 90, 92],
+    "training_completion": [0, 8, 21, 34, 45, 52, 60, 66, 71],
+    "projects_security_reviewed": [30, 33, 40, 45, 50, 55, 58, 60, 62],
+}
+
+
+def _seed_security() -> None:
+    for metric, vals in DEMO_TRENDS.items():
+        for per, v in zip(_demo_months(), vals):
             security.upsert(per, metric, v)

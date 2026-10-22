@@ -177,3 +177,135 @@ def test_helpers():
     assert "<script>" not in html and "javascript:" not in html and 'href="/dokumanlar/3"' in html
     assert ai.parse_number("14,5 milyon TL") == 14_500_000 and ai.parse_number("15.200.000 TL") == 15_200_000
     assert knowledge.norm("KPI İLK") == "kpi ilk"
+
+
+# ---------------------------------------------------------------- v2.1
+
+TRELLO = {
+    "name": "AI Impact",
+    "lists": [{"id": "L1", "name": "İŞ LİSTESİ"}, {"id": "L2", "name": "INPROGRESS"}, {"id": "L3", "name": "DONE/MAINTENANCE"},
+              {"id": "L4", "name": "AI Champion"}, {"id": "L5", "name": "ÖN DEĞERLENDİRME"}],
+    "labels": [{"id": "B1", "name": "AI Impact"}, {"id": "B2", "name": "Dependent"}],
+    "members": [{"id": "M1", "fullName": "Burak Özkarabekir"}],
+    "checklists": [{"id": "K1", "name": "Checklist", "checkItems": [{"name": "DT ön görüşme", "state": "incomplete"}]}],
+    "cards": [
+        {"id": "68000000a1", "name": "UC88-YP Lojistik-Spare Parts Demand Forecasting", "idList": "L2", "idLabels": ["B1", "B2"],
+         "idMembers": ["M1"], "due": "2027-01-08T09:00:00.000Z", "desc": "Yedek parça talep tahmini. Detay.", "idChecklists": ["K1"]},
+        {"id": "68000000a2", "name": "UC88- Yedek Parça Lojistik - Stok Optimizasyon", "idList": "L1", "idLabels": [], "idMembers": []},
+        {"id": "68000000a3", "name": "UC57-VW Binek - Price Positioning Faz2", "idList": "L3", "idLabels": ["B1"], "idMembers": []},
+        {"id": "68000000a4", "name": "UC62 - Micro-Segment & Personalization Engine", "idList": "L5", "idLabels": [], "idMembers": []},
+        {"id": "68000000a5", "name": "AI Championlar", "idList": "L4", "idLabels": [], "idMembers": []},
+    ],
+    "actions": [
+        {"type": "updateCard", "date": "2026-10-05T10:39:56.154Z", "data": {"card": {"id": "68000000a1"},
+         "listBefore": {"id": "L1", "name": "İŞ LİSTESİ"}, "listAfter": {"id": "L2", "name": "INPROGRESS"}}},
+        {"type": "updateCard", "date": "2026-04-06T10:00:00.000Z", "data": {"card": {"id": "68000000a3"},
+         "listBefore": {"id": "L2", "name": "INPROGRESS"}, "listAfter": {"id": "L3", "name": "DONE/MAINTENANCE"}}},
+        {"type": "commentCard", "date": "2026-09-01T10:00:00.000Z", "data": {"card": {"id": "68000000a1"}, "text": "ERP onayı bekleniyor"},
+         "memberCreator": {"fullName": "Burak Özkarabekir"}},
+    ],
+}
+
+
+def test_trello_parse_and_import(client):
+    from app import trello
+    assert trello.parse_name("UC88-YP Lojistik-Spare Parts Demand Forecasting")["unit"] == "YP Lojistik"
+    assert trello.parse_name("UC62 - Micro-Segment & Personalization Engine")["unit"] is None
+    assert trello.parse_name("UC32 & UC43- Total Cost of Ownership")["extra"] == ["UC43"]
+    assert trello.guess_stage("ÖN DEĞERLENDİRME") == "analiz" and trello.guess_stage("AI Champion") == "atla"
+    raw = json.dumps(TRELLO)
+    r = client.post("/ayarlar/trello/onizle", files={"file": ("t.json", raw.encode(), "application/json")})
+    assert r.status_code == 200 and "UC88" in r.text  # tekrar eden kod uyarısı
+    yp = db.scalar("SELECT id FROM departments WHERE name = 'Yedek Parça & Lojistik'")
+    form = {"stage_L1": "fikir", "stage_L2": "gelistirme", "stage_L3": "canli", "stage_L4": "atla", "stage_L5": "analiz",
+            "unit_YP Lojistik": str(yp), "unit_Yedek Parça Lojistik": str(yp), "unit_VW Binek": "marka", "update_existing": "1"}
+    client.post("/ayarlar/trello/aktar", data=form)
+    p = db.row("SELECT * FROM projects WHERE code = 'UC88'")
+    assert p["stage"] == "gelistirme" and p["department_id"] == yp and p["start_date"] == "2026-10-05"
+    assert p["target_date"] == "2027-01-08" and p["health"] == "sari" and "Dependent" in p["tags"] and p["owner"] == "Burak Özkarabekir"
+    assert db.scalar("SELECT code FROM projects WHERE trello_id = '68000000a2'") == "UC88-2"
+    f2 = db.row("SELECT * FROM projects WHERE code = 'UC57-F2'")
+    assert f2["brands"] == "VW Binek" and f2["golive_date"] == "2026-04-06"
+    assert not db.scalar("SELECT 1 FROM projects WHERE name = 'AI Championlar'")
+    assert db.scalar("SELECT COUNT(*) FROM comments WHERE target_id = ? AND kind = 'trello'", (p["id"],)) == 1
+    assert db.scalar("SELECT COUNT(*) FROM actions WHERE project_id = ? AND source = 'Trello checklist'", (p["id"],)) == 1
+    # yeniden aktarım tekrar kayıt oluşturmaz
+    n = db.scalar("SELECT COUNT(*) FROM projects")
+    st = trello.import_board(raw, {k[6:]: v for k, v in form.items() if k.startswith("stage_")}, {}, 1)
+    assert st["created"] == 0 and db.scalar("SELECT COUNT(*) FROM projects") == n
+    assert db.scalar("SELECT COUNT(*) FROM comments WHERE target_id = ? AND kind = 'trello'", (p["id"],)) == 1
+
+
+def test_word_table_report_links_by_uc_code(client):
+    d = docx.Document()
+    d.add_heading("AI IMPACT Proje Statü Raporu", 0)
+    t = d.add_table(rows=2, cols=3)
+    for j, v in enumerate(("Kod", "Durum", "Sonraki adım")):
+        t.cell(0, j).text = v
+    for j, v in enumerate(("UC 88", "Veri erişimi bekleniyor, gecikme var", "UAT")):
+        t.cell(1, j).text = v
+    buf = io.BytesIO()
+    d.save(buf)
+    r = client.post("/dokumanlar", files=[("files", ("Statü.docx", buf.getvalue(), "application/octet-stream"))],
+                    data={"doc_type": "dt_durum"}, follow_redirects=False)
+    did = int(r.headers["location"].rsplit("/", 1)[1])
+    pipeline.drain()
+    pid = db.scalar("SELECT id FROM projects WHERE code = 'UC88'")
+    assert db.scalar("SELECT 1 FROM document_links WHERE document_id = ? AND project_id = ?", (did, pid))
+    assert db.scalar("SELECT value_text FROM facts WHERE document_id = ? AND project_id = ? AND fact_type = 'durum'", (did, pid)).startswith("Veri erişimi")
+    assert "AI bağlı değil" in client.get(f"/dokumanlar/{did}").text  # mock modda kullanıcı uyarılır
+
+
+def test_edit_endpoints(client):
+    pid = db.scalar("SELECT id FROM projects WHERE code = 'UC88'")
+    client.post(f"/projeler/{pid}/aksiyon", data={"title": "Eski", "owner": "", "due_date": ""})
+    aid = db.scalar("SELECT id FROM actions WHERE title = 'Eski'")
+    client.post(f"/aksiyon/{aid}/duzenle", data={"title": "Yeni başlık", "owner": "BT", "due_date": "2026-12-01"})
+    assert db.row("SELECT * FROM actions WHERE id = ?", (aid,))["title"] == "Yeni başlık"
+    client.post(f"/aksiyon/{aid}/sil")
+    assert not db.row("SELECT 1 FROM actions WHERE id = ?", (aid,))
+    client.post(f"/projeler/{pid}/kpi", data={"name": "Stok", "unit": "", "direction": "up"})
+    kid = db.scalar("SELECT id FROM kpis WHERE project_id = ? AND name = 'Stok'", (pid,))
+    client.post(f"/kpi/{kid}", data={"name": "Stok devir hızı", "unit": "gün", "direction": "down", "baseline": "40"})
+    k = db.row("SELECT * FROM kpis WHERE id = ?", (kid,))
+    assert (k["name"], k["unit"], k["direction"], k["baseline"]) == ("Stok devir hızı", "gün", "down", 40)
+    form = {"name": "Spare Parts", "code": "uc88x", "tags": "AI Impact"}
+    client.post(f"/projeler/{pid}", data=form)
+    assert db.scalar("SELECT code FROM projects WHERE id = ?", (pid,)) == "UC88X"
+    f = next(f for f in knowledge.pending() if f["fact_type"] == "saglik") if knowledge.pending() else None
+    if f:
+        client.post(f"/bilgi/{f['id']}/deger", data={"value": "sari", "as_of": "2026-10-16"})
+        assert db.scalar("SELECT value_text FROM facts WHERE id = ?", (f["id"],)) == "sari"
+    client.post("/guvenlik/metrik", data={"period": "2026-09", "dlp_incidents": "5"})
+    client.post("/guvenlik/metrik/sil", data={"period": "2026-09"})
+    assert not db.scalar("SELECT 1 FROM security_metrics WHERE period = '2026-09'")
+    for url in ["/ayarlar", "/guvenlik?donem=2026-10", f"/projeler/{pid}?tab=aksiyon", f"/projeler/{pid}/duzenle", "/inceleme", "/aksiyonlar"]:
+        assert client.get(url).status_code == 200, url
+
+
+def test_clear_demo_keeps_user_data(client):
+    from app import seed
+    user_doc = db.scalar("SELECT id FROM documents WHERE filename = 'Statü.docx'")
+    client.post("/ayarlar/demo-temizle")
+    assert not db.scalar("SELECT 1 FROM projects WHERE code = 'AI-001'")
+    assert db.scalar("SELECT 1 FROM projects WHERE trello_id = '68000000a1'")  # Trello'dan gelenler korunur
+    assert db.scalar("SELECT 1 FROM documents WHERE id = ?", (user_doc,))
+    assert not db.scalar("SELECT 1 FROM documents WHERE filename = 'AI-002 PDD.docx'")
+    seed.seed_demo()
+    assert not db.scalar("SELECT 1 FROM projects WHERE code = 'AI-001'")  # bir daha yüklenmez
+
+
+def test_provider_autodetect(monkeypatch):
+    import importlib
+    monkeypatch.setenv("AI_PROVIDER", "mock")
+    monkeypatch.setenv("AI_BASE_URL", "https://ai.sirket.local/v1/chat/completions")
+    importlib.reload(config)
+    try:
+        assert config.AI_PROVIDER == "openai" and config.AI_BASE_URL == "https://ai.sirket.local/v1"
+        monkeypatch.setenv("AI_BASE_URL", "https://x.openai.azure.com")
+        importlib.reload(config)
+        assert config.AI_PROVIDER == "azure"
+    finally:
+        monkeypatch.setenv("AI_PROVIDER", "mock")
+        monkeypatch.setenv("AI_BASE_URL", "")
+        importlib.reload(config)

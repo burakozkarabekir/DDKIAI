@@ -1,8 +1,44 @@
 {% extends "base.html" %}
 {% from "partials/macros.html" import health %}
-{% block title %}AI Security{% endblock %}
-{% block crumbs %}AI kullanım ve güvenlik metrikleri · son dönem {{ (periods[-1]|period) if periods else '—' }}{% endblock %}
-{% block topactions %}<a class="btn" href="/guvenlik/sablon.csv">CSV şablonu</a>{% endblock %}
+{% block title %}AI Security{% if table %}
+<div class="card" id="veriler" style="margin-top:16px">
+  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
+  <div class="table-wrap" style="border:0"><table>
+    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
+    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
+      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
+      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
+        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block crumbs %}AI kullanım ve güvenlik metrikleri · son dönem {{ (periods[-1]|period) if periods else '—' }}{% if table %}
+<div class="card" id="veriler" style="margin-top:16px">
+  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
+  <div class="table-wrap" style="border:0"><table>
+    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
+    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
+      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
+      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
+        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block topactions %}<a class="btn" href="/guvenlik/sablon.csv">CSV şablonu</a>{% if table %}
+<div class="card" id="veriler" style="margin-top:16px">
+  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
+  <div class="table-wrap" style="border:0"><table>
+    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
+    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
+      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
+      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
+        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>AI Security</h1>
 <p>Kurumsal AI kullanımı (AI Studio), onaysız AI kullanımı (Shadow AI), veri koruma ve farkındalık. Hedef: güvenli kanalın büyümesi, gölge kullanımın küçülmesi.</p></div></div>
@@ -60,10 +96,13 @@
   {% if user.role in D.CAN_EDIT %}
   <div class="card">
     <h2>Aylık metrik girişi</h2>
+    <form method="get" action="/guvenlik#giris" class="row" style="align-items:flex-end;margin-bottom:10px" id="giris">
+      <div style="flex:1"><label>Dönem seç (mevcut değerler forma gelir)</label><input type="month" name="donem" value="{{ donem }}"></div><button class="btn sm">Getir</button></form>
     <form method="post" action="/guvenlik/metrik">
-      <div class="field"><label>Dönem</label><input type="month" name="period" value="{{ today()[:7] }}" required></div>
-      <div class="form-grid">{% for key, m in metrics.items() %}<div class="field"><label>{{ m.label }} ({{ m.unit }})</label><input name="{{ key }}" inputmode="decimal"></div>{% endfor %}</div>
-      <button class="btn primary">Kaydet</button>
+      <input type="hidden" name="period" value="{{ donem }}">
+      <div class="form-grid">{% for key, m in metrics.items() %}<div class="field"><label>{{ m.label }} ({{ m.unit }})</label><input name="{{ key }}" inputmode="decimal" value="{{ current[key]|num if key in current else '' }}"></div>{% endfor %}</div>
+      <label class="row small" style="font-weight:500"><input type="checkbox" name="clear_empty" value="1"> Boş bıraktığım metrikleri bu dönemden sil</label>
+      <button class="btn primary" style="margin-top:8px">{{ donem|period }} dönemini kaydet</button>
     </form>
     <hr>
     <h3>CSV ile toplu yükleme</h3>
@@ -72,4 +111,16 @@
   </div>
   {% endif %}
 </div>
+{% if table %}
+<div class="card" id="veriler" style="margin-top:16px">
+  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
+  <div class="table-wrap" style="border:0"><table>
+    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
+    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
+      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
+      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
+        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
 {% endblock %}

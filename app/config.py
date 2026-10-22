@@ -15,7 +15,12 @@ def _load_dotenv() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        value = value.strip()
+        if value[:1] in ('"', "'") and value[-1:] == value[:1]:
+            value = value[1:-1]
+        elif " #" in value:  # satır sonu yorumu: AI_PROVIDER=openai   # açıklama
+            value = value.split(" #", 1)[0].strip()
+        os.environ.setdefault(key.strip(), value)
 
 
 _load_dotenv()
@@ -23,7 +28,7 @@ _load_dotenv()
 APP_NAME = os.getenv("APP_NAME", "AI Impact Merkezi")
 ORG_NAME = os.getenv("ORG_NAME", "Doğuş Otomotiv · Dijital Dönüşüm")
 SECRET_KEY = os.getenv("SECRET_KEY", "degistir-beni-uretimde")
-SEED_DEMO = os.getenv("SEED_DEMO", "1") == "1"
+SEED_DEMO = os.getenv("SEED_DEMO", "1") == "1"  # demo verisi "Ayarlar > Demo verisini temizle" ile kalıcı kaldırılır
 SESSION_HOURS = int(os.getenv("SESSION_HOURS", "12"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
 
@@ -42,10 +47,19 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))
 SOFFICE_PATH = os.getenv("SOFFICE_PATH", "")
 
 # --- Şirket içi AI uç noktası ---
-# AI_PROVIDER: "openai" (OpenAI uyumlu /chat/completions — vLLM, LiteLLM, Ollama, kurumsal gateway),
-#              "azure" (Azure OpenAI), "anthropic" (Messages API) veya "mock" (demo modu)
-AI_PROVIDER = os.getenv("AI_PROVIDER", "mock").lower()
-AI_BASE_URL = os.getenv("AI_BASE_URL", "").rstrip("/")
+# AI_PROVIDER: "auto" (varsayılan; adresten tahmin), "openai" (OpenAI uyumlu /chat/completions — vLLM, LiteLLM,
+#              Ollama, kurumsal gateway), "azure" (Azure OpenAI), "anthropic" (Messages API).
+#              AI_BASE_URL boşsa demo (mock) modunda çalışılır.
+AI_BASE_URL = os.getenv("AI_BASE_URL", "").strip().rstrip("/")
+for _suffix in ("/chat/completions", "/v1/messages"):  # yanlışlıkla tam uç nokta yazıldıysa
+    if AI_BASE_URL.endswith(_suffix):
+        AI_BASE_URL = AI_BASE_URL[: -len(_suffix)]
+AI_PROVIDER_SET = os.getenv("AI_PROVIDER", "auto").strip().lower() or "auto"
+# "auto" ya da adres girilmiş ama "mock" bırakılmışsa sağlayıcı adresten tahmin edilir.
+if AI_PROVIDER_SET in ("auto", "mock") and AI_BASE_URL:
+    AI_PROVIDER = "azure" if ".openai.azure.com" in AI_BASE_URL else "anthropic" if "anthropic" in AI_BASE_URL else "openai"
+else:
+    AI_PROVIDER = AI_PROVIDER_SET if AI_BASE_URL else "mock"
 AI_API_KEY = os.getenv("AI_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "")
 AI_AZURE_API_VERSION = os.getenv("AI_AZURE_API_VERSION", "2024-10-21")

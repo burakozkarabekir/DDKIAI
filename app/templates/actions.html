@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Aksiyonlar{% endblock %}
 {% block crumbs %}Komite ve proje kararlarından doğan aksiyonlar{% endblock %}
+{% from "partials/macros.html" import action_edit %}
 {% block content %}
 <div class="page-head"><div><h1>Aksiyonlar</h1><p>Haftalık değerlendirme ve yönlendirme komitesinden çıkan, sahibi ve termini olan işler. Geciken aksiyonlar yönetici özetinde görünür.</p></div>
 <div class="seg">{% for k, l in [('acik','Açık'),('kapali','Kapanan'),('hepsi','Tümü')] %}<a href="?durum={{ k }}" class="{{ 'on' if durum == k }}">{{ l }}</a>{% endfor %}</div></div>
@@ -19,7 +20,7 @@
     <td style="{{ 'text-decoration:line-through;color:var(--muted)' if a.status == 'kapali' }}">{{ a.title }}</td>
     <td class="small">{% if a.project_id %}<a href="/projeler/{{ a.project_id }}?tab=aksiyon"><span class="code">{{ a.code }}</span> {{ a.pname }}</a>{% else %}Genel{% endif %}</td>
     <td class="small">{{ a.owner or '—' }}</td>
-    <td class="small nowrap {{ 'health kirmizi' if a.status == 'acik' and a.due_date|overdue }}">{{ a.due_date|date }}</td><td class="small muted">{% if a.source_document_id %}<a class="cite" href="/dokumanlar/{{ a.source_document_id }}" title="{{ a.dtitle }}">D{{ a.source_document_id }}</a>{% else %}{{ a.source or '' }}{% endif %}</td></tr>
+    <td class="small nowrap {{ 'health kirmizi' if a.status == 'acik' and a.due_date|overdue }}">{{ a.due_date|date }}</td><td class="small muted nowrap">{% if user.role in D.CAN_EDIT %}{{ action_edit(a) }}{% endif %}{% if a.source_document_id %}<a class="cite" href="/dokumanlar/{{ a.source_document_id }}" title="{{ a.dtitle }}">D{{ a.source_document_id }}</a>{% else %}{{ a.source or '' }}{% endif %}</td></tr>
   {% else %}<tr><td colspan="6" class="empty">Aksiyon yok.</td></tr>{% endfor %}</tbody>
 </table></div>
 {% endblock %}

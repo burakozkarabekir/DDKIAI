@@ -72,11 +72,26 @@ def _pdf(path: Path):
     return [s for s in sections if s[1]], len(reader.pages)
 
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _wtext(el) -> str:
+    """Bir öğenin altındaki tüm metin (hiperlink, alan, metin kutusu dahil); sekme/satır sonu korunur."""
+    out = []
+    for node in el.iter():
+        if node.tag == _W + "t":
+            out.append(node.text or "")
+        elif node.tag == _W + "tab":
+            out.append(" ")
+        elif node.tag in (_W + "br", _W + "cr"):
+            out.append("\n")
+    return "".join(out).strip()
+
+
 def _docx(path: Path):
     import docx
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
     d = docx.Document(str(path))
+    styles = {s.style_id: (s.name or "").lower() for s in d.styles}
     sections, heading, buf = [], "", []
 
     def flush():
@@ -86,27 +101,51 @@ def _docx(path: Path):
         elif heading:  # içeriksiz başlık (ör. doküman başlığı) kaybolmasın: proje eşleştirmede gerekli
             sections.append((heading, heading))
 
-    for block in d.element.body.iterchildren():
-        tag = block.tag.rsplit("}", 1)[-1]
-        if tag == "p":
-            p = Paragraph(block, d)
-            text = p.text.strip()
-            style = (p.style.name or "").lower() if p.style is not None else ""
-            if text and (style.startswith("heading") or style.startswith("başlık") or style == "title"):
-                flush()
-                heading = text
-            elif text:
-                buf.append(text)
-        elif tag == "tbl":
-            t = Table(block, d)
-            for r in t.rows:
-                cells = []
-                for c in r.cells:
-                    v = c.text.strip()
-                    if not cells or cells[-1] != v:  # birleştirilmiş hücre tekrarlarını at
-                        cells.append(v)
-                if any(cells):
-                    buf.append(" | ".join(cells))
+    def table_rows(tbl):
+        rows = []
+        for tr in tbl.findall(_W + "tr"):
+            cells = []
+            for tc in tr.findall(_W + "tc"):
+                cells.append(" ".join(t for t in (_wtext(p) for p in tc.iter(_W + "p")) if t))
+            if any(cells):
+                rows.append(cells)
+        if not rows:
+            return
+        header = rows[0]
+        # İlk satır başlık gibi görünüyorsa (kısa, sayı olmayan hücreler) her satıra sütun adlarını ekle
+        use_header = len(rows) > 1 and len(header) > 1 and all(0 < len(h) <= 40 and not re.search(r"\d{3,}", h) for h in header)
+        for cells in rows[1:] if use_header else rows:
+            if use_header and len(cells) == len(header):
+                parts = [f"{h}: {v}" for h, v in zip(header, cells) if v]
+            else:
+                parts = []
+                for v in cells:
+                    if v and (not parts or parts[-1] != v):  # birleştirilmiş hücre tekrarlarını at
+                        parts.append(v)
+            if parts:
+                yield " | ".join(parts)
+
+    def walk(container):
+        nonlocal heading
+        for block in container.iterchildren():
+            tag = block.tag
+            if tag == _W + "p":
+                text = _wtext(block)
+                ps = block.find(f"{_W}pPr/{_W}pStyle")
+                style = styles.get(ps.get(_W + "val"), "") if ps is not None else ""
+                is_heading = style.startswith(("heading", "başlık", "title")) or style == "title"
+                if text and is_heading and len(text) <= 200:
+                    flush()
+                    heading = text
+                elif text:
+                    buf.append(text)
+            elif tag == _W + "tbl":
+                buf.extend(table_rows(block))
+            elif tag in (_W + "sdt", _W + "customXml", _W + "smartTag"):
+                content = block.find(_W + "sdtContent")
+                walk(content if content is not None else block)
+
+    walk(d.element.body)
     flush()
     return sections
 

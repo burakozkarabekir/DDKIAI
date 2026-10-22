@@ -29,6 +29,7 @@
         <div class="field"><label>Kategori</label><select name="category"><option value="guvenlik" {{ 'selected' if i.category == 'guvenlik' }}>Güvenlik</option><option value="platform" {{ 'selected' if i.category == 'platform' }}>Platform</option></select></div>
         <button class="btn primary sm">Kaydet</button>
       </form>
+      <form method="post" action="/guvenlik/girisim/{{ i.slug }}/sil" data-confirm="{{ i.name }} ve yorumları silinsin mi?" style="margin-top:10px"><button class="btn ghost sm danger">Girişimi sil</button></form>
     </div>{% endif %}
   </div>
 </div>

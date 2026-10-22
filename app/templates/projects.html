@@ -3,7 +3,7 @@
 {% block title %}Projeler{% endblock %}
 {% block crumbs %}AI Impact portföyü · {{ projects|length }} proje{% endblock %}
 {% block topactions %}
-{% if user.role in D.CAN_EDIT %}<a class="btn primary" href="/projeler/yeni">+ Yeni proje</a>{% endif %}
+{% if user.role in D.CAN_EDIT %}<a class="btn" href="/ayarlar#trello">Trello'dan aktar</a><a class="btn primary" href="/projeler/yeni">+ Yeni proje</a>{% endif %}
 {% endblock %}
 {% block content %}
 <div class="page-head">
@@ -26,6 +26,9 @@
 </form>
 
 {% if view == 'pano' %}
+{% if not projects and not (filters.q or filters.stage or filters.health or filters.departman or filters.olcum) %}
+<div class="card empty">Henüz proje yok. <a href="/ayarlar#trello">Trello panonuzu aktarın</a> ya da <a href="/projeler/yeni">yeni proje ekleyin</a>.</div>
+{% endif %}
 <div class="board">
   {% for key, label, desc in D.STAGES + D.SIDE_STAGES %}
   {% set col = projects|selectattr('stage', 'equalto', key)|list %}
@@ -36,6 +39,7 @@
     <a class="pcard {{ p.health }}" href="/projeler/{{ p.id }}">
       <div class="row"><span class="code">{{ p.code }}</span><span class="spacer"></span>{{ health(p.health) }}</div>
       <div class="t">{{ p.name }}</div>
+      {% if p.tags %}<div class="meta" style="margin-bottom:4px">{% for t in p.tags.split(',') if t.strip() and t.strip() != 'AI Impact' %}<span class="badge tag">{{ t.strip() }}</span>{% endfor %}</div>{% endif %}
       <div class="meta">
         <span>{{ p.dept or 'Departman yok' }}</span>
         {% if p.target_date %}<span class="{{ 'health kirmizi' if p.target_date|overdue and p.stage not in ('canli','olcekleme') }}">⏱ {{ p.target_date|date }}</span>{% endif %}

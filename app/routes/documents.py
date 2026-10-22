@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from .. import db, domain, knowledge, pipeline
 from ..auth import require_editor, require_internal
 from ..storage import UploadError, path_of, save_stream
-from ..web import back, departments, flash, redirect, render
+from ..web import back, departments, flash, parse_float, redirect, render
 
 router = APIRouter()
 
@@ -239,6 +239,32 @@ async def review_bulk(request: Request, user=Depends(require_internal)):
             knowledge.reject_fact(fid, user["id"])
             n += 1
     flash(request, f"{n} öneri {'onaylandı ve projelere işlendi' if action == 'onayla' else 'reddedildi'}.")
+    return back(request, "/inceleme")
+
+
+@router.post("/bilgi/{fid}/deger")
+def review_edit(request: Request, fid: int, value: str = Form(""), as_of: str = Form(""), user=Depends(require_internal)):
+    """Öneriyi onaylamadan önce değerini düzeltme."""
+    f = db.row("SELECT * FROM facts WHERE id = ?", (fid,))
+    if not f or f["status"] not in ("oneri", "bilgi"):
+        raise HTTPException(404, "Bilgi bulunamadı")
+    data = {"as_of": knowledge._iso(as_of) or f["as_of"], "confidence": 1.0}
+    v = value.strip()
+    if f["fact_type"] in ("kpi", "kazanim") and f["field"] != "measurement_status":
+        num = parse_float(v)
+        if num is None:
+            flash(request, "Sayısal bir değer girin.", "error")
+            return back(request, "/inceleme")
+        data["value_num"] = num
+    elif f["fact_type"] == "tarih":
+        if not knowledge._iso(v):
+            flash(request, "Tarihi GG.AA.YYYY ya da YYYY-AA-GG biçiminde girin.", "error")
+            return back(request, "/inceleme")
+        data["value_text"] = knowledge._iso(v)
+    else:
+        data["value_text"] = v[:4000]
+    db.update("facts", fid, data)
+    flash(request, "Değer güncellendi. Onaylarsanız bu değer projeye işlenir.")
     return back(request, "/inceleme")
 
 

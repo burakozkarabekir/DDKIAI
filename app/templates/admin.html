@@ -5,18 +5,7 @@
 <div class="page-head"><div><h1>Yönetim</h1>
 {% if not AUTH_ENABLED %}<p><b>Giriş ekranı kapalı</b> (<code>AUTH_ENABLED=0</code>): herkes "Dijital Dönüşüm Ekibi" ortak hesabıyla çalışır. Kullanıcılar ve roller korunur;
 <code>.env</code> dosyasında <code>AUTH_ENABLED=1</code> yapıp yeniden başlatınca giriş ekranı ve rol bazlı yetkiler devreye girer.</p>{% endif %}</div></div>
-{% if preview %}
-<div class="card" style="margin-bottom:16px">
-  <h2>Trello aktarım önizlemesi · {{ preview.board }}</h2>
-  <p class="small">{{ preview.card_count }} açık kart bulundu. Her Trello listesinin hangi aşamaya karşılık geldiğini kontrol edin. Yorumlar ve ek linkleri projeye taşınır.</p>
-  <form method="post" action="/yonetim/trello/aktar">
-    <table style="max-width:640px"><thead><tr><th>Trello listesi</th><th class="num">Kart</th><th>Aşama</th></tr></thead><tbody>
-    {% for l in preview.lists %}<tr><td>{{ l.name }}</td><td class="num">{{ l.count }}</td><td><select name="stage_{{ l.id }}">{% for k, lab, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if k == l.stage }}>{{ lab }}</option>{% endfor %}</select></td></tr>{% endfor %}
-    </tbody></table>
-    <div class="row" style="margin-top:12px"><button class="btn primary">İçe aktar</button><a class="btn ghost" href="/yonetim">Vazgeç</a></div>
-  </form>
-</div>
-{% endif %}
+
 <div class="grid g-main">
   <div class="stack">
     <div class="table-wrap">
@@ -39,7 +28,8 @@
                 <button class="btn primary sm">Kaydet</button>
               </form>
             </details>
-            {% if u.id != user.id %}<form method="post" action="/yonetim/kullanici/{{ u.id }}/durum" style="display:inline"><button class="btn ghost sm">{{ 'Pasifleştir' if u.active else 'Aktifleştir' }}</button></form>{% endif %}
+            {% if u.id != user.id and u.email != 'ekip@ai-impact.local' %}<form method="post" action="/yonetim/kullanici/{{ u.id }}/durum" style="display:inline"><button class="btn ghost sm">{{ 'Pasifleştir' if u.active else 'Aktifleştir' }}</button></form>
+            <form method="post" action="/yonetim/kullanici/{{ u.id }}/sil" style="display:inline" data-confirm="{{ u.name }} silinsin mi?"><button class="btn ghost sm danger">Sil</button></form>{% endif %}
           </td>
         </tr>{% endfor %}</tbody>
       </table>
@@ -61,10 +51,7 @@
         <button class="btn primary">Ekle</button>
       </form>
     </div>
-    <div class="card"><h2>Trello'dan içe aktar</h2>
-      <p class="small">Trello panosunda <b>Menü → Yazdır, dışa aktar ve paylaş → JSON olarak dışa aktar</b> ile indirdiğiniz dosyayı yükleyin. Kartlar proje, listeler aşama olur.</p>
-      <form method="post" action="/yonetim/trello/onizle" enctype="multipart/form-data"><input type="file" name="file" accept=".json" required><button class="btn sm" style="margin-top:8px">Önizle</button></form>
-    </div>
+    <div class="card"><h2>Trello'dan içe aktar</h2><p class="small">Trello aktarımı <a href="/ayarlar#trello">Ayarlar</a> sayfasına taşındı.</p></div>
     <div class="card"><h2>AI bağlantısı</h2>
       <p class="small">Durum: <b>{{ ai_label() }}</b></p>
       <p class="small muted">Uç nokta <code>.env</code> dosyasındaki <code>AI_PROVIDER</code>, <code>AI_BASE_URL</code>, <code>AI_API_KEY</code>, <code>AI_MODEL</code> ile ayarlanır.</p>

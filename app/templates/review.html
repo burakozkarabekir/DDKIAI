@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import doc_type %}
+{% from "partials/macros.html" import doc_type, fact_edit %}
 {% block title %}İnceleme Kuyruğu{% endblock %}
 {% block crumbs %}{{ total }} öneri onay bekliyor{% endblock %}
 {% block content %}
@@ -14,25 +14,25 @@ Onaylanan değer projeye işlenir; kaynağı ve alıntısı kayıt altında kal�
 <div class="callout" style="margin-bottom:16px"><b>{{ conflicts|length }} alanda kaynaklar çelişiyor.</b> Bu alanlarda hangi dokümanın doğru olduğuna siz karar verin:
   {% for c in conflicts[:6] %}<a href="/projeler/{{ c.project_id }}?tab=bilgi">{{ c.code }} · {{ c.label }}</a>{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
 {% if grouped %}
-<form method="post" action="/inceleme">
+<form id="bulk" method="post" action="/inceleme"></form>
   <div class="row" style="margin-bottom:12px"><label class="row small" style="margin:0"><input type="checkbox" data-check-all=".pick"> Tümünü seç</label><span class="spacer"></span>
-    <button class="btn primary" name="action" value="onayla">Seçilenleri onayla ve uygula</button><button class="btn" name="action" value="reddet">Seçilenleri reddet</button></div>
+    <button form="bulk" class="btn primary" name="action" value="onayla">Seçilenleri onayla ve uygula</button><button form="bulk" class="btn" name="action" value="reddet">Seçilenleri reddet</button></div>
   {% for (pid, code, pname), items in grouped.items() %}
   <div class="card" style="margin-bottom:12px">
     <div class="card-head"><h3><span class="code">{{ code }}</span> <a href="/projeler/{{ pid }}?tab=bilgi">{{ pname }}</a></h3><span class="badge">{{ items|length }}</span></div>
     <table class="facts">
       <thead><tr><th></th><th>Alan</th><th>Şu anki değer</th><th>Önerilen</th><th>Kaynak</th><th></th></tr></thead>
       {% for f in items %}
-      <tr><td><input type="checkbox" class="pick" name="fact_id" value="{{ f.id }}"></td>
+      <tr><td><input form="bulk" type="checkbox" class="pick" name="fact_id" value="{{ f.id }}"></td>
         <td class="small"><b>{{ f.label }}</b><div class="muted">{{ f.as_of|date }}</div></td>
         <td class="small muted" style="max-width:240px">{{ f.current|truncate(120) }}</td>
         <td class="small" style="max-width:320px"><b>{{ f.display|truncate(220) }}</b>{% if f.evidence %}<div class="quote">“{{ f.evidence|truncate(180) }}”</div>{% endif %}</td>
         <td class="small">{{ doc_type(f.doc_type) }}<div><a class="cite" href="/dokumanlar/{{ f.document_id }}">D{{ f.document_id }}</a> {{ f.dtitle|truncate(30) }}</div>{% if f.confidence %}<div class="muted">güven %{{ (f.confidence * 100)|round|int }}</div>{% endif %}</td>
-        <td class="nowrap"><button class="btn sm" formaction="/bilgi/{{ f.id }}/onayla">✓</button> <button class="btn ghost sm" formaction="/bilgi/{{ f.id }}/reddet">✕</button></td></tr>
+        <td class="nowrap"><button form="bulk" class="btn sm" formaction="/bilgi/{{ f.id }}/onayla" title="Onayla ve uygula">✓</button> <button form="bulk" class="btn ghost sm" formaction="/bilgi/{{ f.id }}/reddet" title="Reddet">✕</button> {{ fact_edit(f) }}</td></tr>
       {% endfor %}
     </table>
   </div>
   {% endfor %}
-</form>
+
 {% else %}<div class="card empty">Onay bekleyen öneri yok. Yeni dokümanlar yüklendikçe öneriler burada görünür.</div>{% endif %}
 {% endblock %}

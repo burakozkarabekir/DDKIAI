@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from markupsafe import Markup
 
-from .. import ai, charts, config, db, domain, pipeline, security, storage, trello
+from .. import ai, charts, config, db, domain, pipeline, security, seed, storage, trello
 from ..auth import authenticate, hash_password, require_admin, require_editor, require_internal, require_user
 from ..web import flash, md, parse_float, period, redirect, render, templates
 from .projects import comments_for
@@ -118,8 +118,31 @@ def security_page(request: Request, user=Depends(require_internal)):
                           "FROM initiatives i ORDER BY category DESC, name")
     project_sec = db.rows("SELECT code, name, id, stage, security_review, data_class FROM projects "
                           "WHERE stage IN ('gelistirme','pilot','canli','olcekleme') ORDER BY security_review, code")
+    donem = request.query_params.get("donem") or date.today().strftime("%Y-%m")
+    current = {r["metric"]: r["value"] for r in db.rows("SELECT metric, value FROM security_metrics WHERE period = ?", (donem,))}
+    table = {}
+    for r in db.rows("SELECT period, metric, value FROM security_metrics ORDER BY period DESC"):
+        table.setdefault(r["period"], {})[r["metric"]] = r["value"]
     return render(request, "security.html", user, groups=groups, initiatives=initiatives, project_sec=project_sec,
-                  periods=security.latest_periods(), metrics=security.METRICS)
+                  periods=security.latest_periods(), metrics=security.METRICS, donem=donem, current=current, table=table)
+
+
+@router.post("/guvenlik/metrik/sil")
+def security_metric_delete(request: Request, period: str = Form(...), user=Depends(require_editor)):
+    db.execute("DELETE FROM security_metrics WHERE period = ?", (period,))
+    flash(request, f"{period} dönemine ait metrikler silindi.")
+    return redirect("/guvenlik#veriler")
+
+
+@router.post("/guvenlik/girisim/{slug}/sil")
+def initiative_delete(request: Request, slug: str, user=Depends(require_editor)):
+    i = db.row("SELECT * FROM initiatives WHERE slug = ?", (slug,))
+    if i:
+        db.execute("DELETE FROM comments WHERE target_type = 'initiative' AND target_id = ?", (i["id"],))
+        db.execute("UPDATE documents SET initiative_id = NULL WHERE initiative_id = ?", (i["id"],))
+        db.execute("DELETE FROM initiatives WHERE id = ?", (i["id"],))
+        flash(request, f"'{i['name']}' silindi.")
+    return redirect("/guvenlik")
 
 
 @router.post("/guvenlik/metrik")
@@ -130,10 +153,13 @@ async def security_metric(request: Request, user=Depends(require_editor)):
         raise HTTPException(400, "Dönem YYYY-AA formatında olmalı")
     n = 0
     for key in security.METRICS:
-        v = parse_float(form.get(key))
+        raw = str(form.get(key) or "").strip()
+        v = parse_float(raw)
         if v is not None:
-            security.upsert(per, key, v)
+            security.upsert(per, key, v, "manuel")
             n += 1
+        elif raw == "" and form.get("clear_empty"):
+            db.execute("DELETE FROM security_metrics WHERE period = ? AND metric = ?", (per, key))
     flash(request, f"{per} dönemi için {n} metrik kaydedildi.")
     return redirect("/guvenlik")
 
@@ -204,16 +230,41 @@ def process(request: Request, user=Depends(require_user)):
 # ------------------------------------------------------------------ ayarlar
 
 @router.get("/ayarlar", response_class=HTMLResponse)
-def settings(request: Request, user=Depends(require_editor)):
+def settings_page(request: Request, user=Depends(require_editor)):
+    return settings(request, user)
+
+
+def settings(request: Request, user: dict, preview: dict | None = None):
     deps = db.rows("SELECT d.*, (SELECT COUNT(*) FROM projects p WHERE p.department_id = d.id) AS n FROM departments d ORDER BY sort, name")
     ai_cfg = {"provider": config.AI_PROVIDER, "base_url": config.AI_BASE_URL or "—", "model": config.AI_MODEL or "—",
               "key": ("•" * 8 + config.AI_API_KEY[-4:]) if len(config.AI_API_KEY) > 8 else ("tanımlı" if config.AI_API_KEY else "yok"),
               "auth_header": config.AI_AUTH_HEADER or "varsayılan", "context": config.AI_MAX_CONTEXT_CHARS, "timeout": config.AI_TIMEOUT}
     docs = db.row("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS size, SUM(status = 'hata') AS failed, "
                   "SUM(status = 'metin_yok') AS notext FROM documents")
-    return render(request, "settings.html", user, deps=deps, ai_cfg=ai_cfg, usage=storage.usage(), docs=docs,
-                  queue=pipeline.queue_state(), soffice=storage.soffice(), test=request.session.pop("ai_test", None),
-                  failed_jobs=db.rows("SELECT * FROM jobs WHERE status = 'hata' ORDER BY id DESC LIMIT 10"))
+    return render(request, "settings.html", user, usage=storage.usage(), queue=pipeline.queue_state(), soffice=storage.soffice(),
+                  test=request.session.pop("ai_test", None), demo=seed.demo_present(), preview=preview,
+                  provider_set=config.AI_PROVIDER_SET,
+                  failed_jobs=db.rows("SELECT * FROM jobs WHERE status = 'hata' ORDER BY id DESC LIMIT 10"),
+                  mock_docs=db.scalar("SELECT COUNT(*) FROM documents WHERE ai_mode = 'mock' OR (ai_mode IS NULL AND status = 'islendi')"),
+                  ai_cfg=ai_cfg, deps=deps, docs=docs)
+
+
+@router.post("/ayarlar/demo-temizle")
+def demo_clear(request: Request, user=Depends(require_editor)):
+    stats = seed.clear_demo(user["id"])
+    flash(request, f"Demo verisi silindi: {stats['proje']} proje, {stats['doküman']} doküman, {stats['girişim']} girişim ve demo metrikleri. "
+                   "Demo verisi bir daha yüklenmeyecek.")
+    return redirect("/ayarlar")
+
+
+@router.post("/ayarlar/sifirla")
+def reset_everything(request: Request, confirm: str = Form(""), user=Depends(require_admin)):
+    if confirm.strip().upper() not in ("SİL", "SIL"):
+        flash(request, "Onay için kutuya SİL yazın.", "error")
+        return redirect("/ayarlar#tehlike")
+    seed.reset_all(user["id"])
+    flash(request, "Tüm proje, doküman, metrik ve AI verileri silindi. Kullanıcılar ve departmanlar korundu.")
+    return redirect("/ayarlar")
 
 
 @router.post("/ayarlar/departman")
@@ -248,8 +299,8 @@ def ai_test(request: Request, user=Depends(require_editor)):
 
 
 @router.post("/ayarlar/yeniden-isle")
-def reprocess_all(request: Request, user=Depends(require_admin)):
-    n = pipeline.reprocess_all()
+def reprocess_all(request: Request, sadece: str = Form(""), user=Depends(require_editor)):
+    n = pipeline.reprocess_all(only_mock=sadece == "mock")
     flash(request, f"{n} doküman yeniden işleme kuyruğuna alındı. Onaylanmış/reddedilmiş bilgiler korunur.")
     return redirect("/ayarlar")
 
@@ -302,32 +353,50 @@ def admin_user_toggle(request: Request, uid: int, user=Depends(require_admin)):
     return redirect("/yonetim")
 
 
+@router.post("/ayarlar/trello/onizle", response_class=HTMLResponse)
 @router.post("/yonetim/trello/onizle", response_class=HTMLResponse)
-async def trello_preview(request: Request, file: UploadFile = File(...), user=Depends(require_admin)):
-    raw = (await file.read()).decode("utf-8", errors="replace")
+async def trello_preview(request: Request, file: UploadFile = File(...), user=Depends(require_editor)):
+    raw = (await file.read()).decode("utf-8-sig", errors="replace")
     try:
         pv = trello.preview(raw)
     except (json.JSONDecodeError, KeyError, TypeError):
         flash(request, "Geçerli bir Trello JSON dışa aktarımı değil.", "error")
-        return redirect("/yonetim")
+        return redirect("/ayarlar#trello")
     token = secrets.token_hex(12)
     (config.DATA_DIR / f"trello-{token}.json").write_text(raw, encoding="utf-8")
     request.session["trello_file"] = token
-    users = db.rows("SELECT * FROM users ORDER BY active DESC, organization, name")
-    return render(request, "admin.html", user, users=users, log=[], preview=pv)
+    return settings(request, user, preview=pv)
 
 
+@router.post("/ayarlar/trello/aktar")
 @router.post("/yonetim/trello/aktar")
-async def trello_import(request: Request, user=Depends(require_admin)):
+async def trello_import(request: Request, user=Depends(require_editor)):
     form = await request.form()
     token = request.session.pop("trello_file", None)
     path = config.DATA_DIR / f"trello-{token}.json" if token and re.fullmatch(r"[0-9a-f]{24}", token) else None
     if not path or not path.exists():
         flash(request, "Önizleme süresi doldu, dosyayı tekrar yükleyin.", "error")
-        return redirect("/yonetim")
+        return redirect("/ayarlar#trello")
     raw = path.read_text(encoding="utf-8")
     path.unlink()
-    stage_map = {k[6:]: v for k, v in form.items() if k.startswith("stage_") and v in domain.STAGE_LABELS}
-    n = trello.import_board(raw, stage_map, user["id"])
-    flash(request, f"Trello'dan {n} kart proje olarak içe aktarıldı.")
+    stage_map = {k[6:]: v for k, v in form.items() if k.startswith("stage_") and (v in domain.STAGE_LABELS or v == trello.SKIP)}
+    unit_map = {k[5:]: v for k, v in form.items() if k.startswith("unit_")}
+    st = trello.import_board(raw, stage_map, unit_map, user["id"], update_existing=bool(form.get("update_existing")))
+    flash(request, f"Trello aktarımı tamamlandı: {st['created']} yeni proje, {st['updated']} güncellenen, {st['skipped']} atlanan kart · "
+                   f"{st['history']} aşama geçişi, {st['comments']} yorum, {st['actions']} checklist maddesi aktarıldı.")
     return redirect("/projeler")
+
+
+@router.post("/yonetim/kullanici/{uid}/sil")
+def admin_user_delete(request: Request, uid: int, user=Depends(require_admin)):
+    from ..auth import TEAM_EMAIL
+    u = db.row("SELECT * FROM users WHERE id = ?", (uid,))
+    if not u or uid == user["id"] or u["email"] == TEAM_EMAIL:
+        flash(request, "Bu kullanıcı silinemez.", "error")
+    elif db.scalar("SELECT 1 FROM comments WHERE user_id = ?", (uid,)):
+        db.execute("UPDATE users SET active = 0 WHERE id = ?", (uid,))
+        flash(request, "Kullanıcının yorumları olduğu için silinmedi, pasifleştirildi.")
+    else:
+        db.execute("DELETE FROM users WHERE id = ?", (uid,))
+        flash(request, "Kullanıcı silindi.")
+    return redirect("/yonetim")

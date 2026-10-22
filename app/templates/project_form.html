@@ -10,8 +10,11 @@
   <div class="card">
     <h2>Tanım</h2>
     <div class="form-grid">
-      <div class="field span3"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"></div>
+      {% if project.id %}<div class="field"><label>Proje kodu</label><input name="code" value="{{ project.code }}" maxlength="20"></div>
+      <div class="field span2"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"></div>
+      {% else %}<div class="field span3"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"><div class="small muted" style="margin-top:3px">Kod otomatik verilir (AI-…); kaydettikten sonra değiştirebilirsiniz (ör. UC95).</div></div>{% endif %}
       <div class="field span3"><label>Diğer adlar (dokümanlarda geçen farklı isimler, virgülle)</label><input name="aliases" value="{{ project.aliases or '' }}" placeholder="ör. Parça tahminleme, Demand Forecast"><div class="small muted" style="margin-top:3px">AI ve eşleştirme bu adları görünce dokümanı bu projeye bağlar.</div></div>
+      <div class="field span3"><label>Etiketler (virgülle)</label><input name="tags" value="{{ project.tags or '' }}" placeholder="ör. AI Impact, 3rd Party Firma, Dependent"></div>
       <div class="field span3"><label>Kısa özet</label><textarea name="summary" rows="2">{{ project.summary or '' }}</textarea></div>
       <div class="field span3"><label>Problem / fırsat</label><textarea name="problem">{{ project.problem or '' }}</textarea></div>
       <div class="field span3"><label>Önerilen çözüm</label><textarea name="solution">{{ project.solution or '' }}</textarea></div>
