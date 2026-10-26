@@ -9,7 +9,7 @@
 <div class="page-head">
   <div><h1>Projeler</h1><p>Her proje bir kartta: aşama, sağlık, ölçümleme ve son durum. Kartı açıp detay, doküman ve yorumlara ulaşın.</p></div>
   <div class="seg">
-    {% set qs = 'q=' ~ filters.q ~ '&stage=' ~ filters.stage ~ '&health=' ~ filters.health ~ '&departman=' ~ filters.departman ~ '&olcum=' ~ filters.olcum %}
+    {% set qs = 'q=' ~ filters.q ~ '&stage=' ~ filters.stage ~ '&health=' ~ filters.health ~ '&departman=' ~ filters.departman ~ '&marka=' ~ filters.marka ~ '&olcum=' ~ filters.olcum %}
     <a href="?view=pano&{{ qs }}" class="{{ 'on' if view == 'pano' }}">Pano</a>
     <a href="?view=liste&{{ qs }}" class="{{ 'on' if view == 'liste' }}">Liste</a>
   </div>
@@ -20,13 +20,14 @@
   <select name="stage" data-autosubmit><option value="">Tüm aşamalar</option>{% for k, l, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if filters.stage == k }}>{{ l }}</option>{% endfor %}</select>
   <select name="health" data-autosubmit><option value="">Tüm sağlık</option>{% for k, v in D.HEALTH.items() %}<option value="{{ k }}" {{ 'selected' if filters.health == k }}>{{ v[0] }}</option>{% endfor %}</select>
   <select name="departman" data-autosubmit><option value="">Tüm departmanlar</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if filters.departman == d.id|string }}>{{ d.name }}</option>{% endfor %}</select>
+  <select name="marka" data-autosubmit><option value="">Tüm markalar</option>{% for b in brands %}<option value="{{ b.id }}" {{ 'selected' if filters.marka == b.id|string }}>{{ b.name }}</option>{% endfor %}</select>
   <select name="olcum" data-autosubmit><option value="">Tüm ölçümleme</option>{% for k, l in D.MEASUREMENT %}<option value="{{ k }}" {{ 'selected' if filters.olcum == k }}>{{ l }}</option>{% endfor %}</select>
   <button class="btn">Filtrele</button>
-  {% if filters.q or filters.stage or filters.health or filters.departman or filters.olcum %}<a class="btn ghost" href="?view={{ view }}">Temizle</a>{% endif %}
+  {% if filters.q or filters.stage or filters.health or filters.departman or filters.olcum or filters.marka %}<a class="btn ghost" href="?view={{ view }}">Temizle</a>{% endif %}
 </form>
 
 {% if view == 'pano' %}
-{% if not projects and not (filters.q or filters.stage or filters.health or filters.departman or filters.olcum) %}
+{% if not projects and not (filters.q or filters.stage or filters.health or filters.departman or filters.olcum or filters.marka) %}
 <div class="card empty">Henüz proje yok. <a href="/ayarlar#trello">Trello panonuzu aktarın</a> ya da <a href="/projeler/yeni">yeni proje ekleyin</a>.</div>
 {% endif %}
 <div class="board">
@@ -41,7 +42,7 @@
       <div class="t">{{ p.name }}</div>
       {% if p.tags %}<div class="meta" style="margin-bottom:4px">{% for t in p.tags.split(',') if t.strip() and t.strip() != 'AI Impact' %}<span class="badge tag">{{ t.strip() }}</span>{% endfor %}</div>{% endif %}
       <div class="meta">
-        <span>{{ p.dept or 'Departman yok' }}</span>
+        <span>{{ p.dept or 'Departman yok' }}</span>{% if p.brand_list %}<span>· {{ p.brand_list|join(', ') }}</span>{% endif %}
         {% if p.target_date %}<span class="{{ 'health kirmizi' if p.target_date|overdue and p.stage not in ('canli','olcekleme') }}">⏱ {{ p.target_date|date }}</span>{% endif %}
       </div>
       <div class="meta" style="margin-top:6px">
@@ -60,7 +61,7 @@
 {% else %}
 <div class="table-wrap">
 <table>
-  <thead><tr><th>Kod</th><th>Proje</th><th>Aşama</th><th>Sağlık</th>{% if user.role != 'dt' %}<th>Risk</th>{% endif %}<th>Ölçümleme</th><th>Departman</th><th>DT sorumlusu</th><th>Hedef</th><th class="num">Tahmini değer</th><th>Son durum</th></tr></thead>
+  <thead><tr><th>Kod</th><th>Proje</th><th>Aşama</th><th>Sağlık</th>{% if user.role != 'dt' %}<th>Risk</th>{% endif %}<th>Ölçümleme</th><th>Departman</th><th>Marka</th><th>DT sorumlusu</th><th>Hedef</th><th class="num">Tahmini değer</th><th>Son durum</th></tr></thead>
   <tbody>
   {% for p in projects %}
   <tr>
@@ -69,11 +70,11 @@
     <td>{{ stage(p.stage) }}</td><td>{{ health(p.health) }}</td>
     {% if user.role != 'dt' %}<td>{{ risk(p.ai_risk_score) }}</td>{% endif %}
     <td class="small">{{ D.MEASUREMENT_LABELS[p.measurement_status] }}</td>
-    <td class="small">{{ p.dept or '—' }}</td><td class="small">{{ p.dt_lead or '—' }}</td>
+    <td class="small">{{ p.dept or '—' }}</td><td class="small">{{ p.brand_list|join(', ') or '—' }}</td><td class="small">{{ p.dt_lead or '—' }}</td>
     <td class="small nowrap">{{ p.target_date|date }}</td><td class="num small">{{ p.estimated_value|money }}</td>
     <td class="small nowrap">{{ p.last_status_at|ago }}</td>
   </tr>
-  {% else %}<tr><td colspan="11" class="empty">Filtreye uyan proje yok.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="12" class="empty">Filtreye uyan proje yok.</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>

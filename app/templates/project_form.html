@@ -12,15 +12,20 @@
     <div class="form-grid">
       {% if project.id %}<div class="field"><label>Proje kodu</label><input name="code" value="{{ project.code }}" maxlength="20"></div>
       <div class="field span2"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"></div>
-      {% else %}<div class="field span3"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"><div class="small muted" style="margin-top:3px">Kod otomatik verilir (AI-…); kaydettikten sonra değiştirebilirsiniz (ör. UC95).</div></div>{% endif %}
+      {% else %}<div class="field"><label>Proje kodu</label><input name="code" maxlength="20" placeholder="ör. UC95 (boşsa AI-… verilir)"></div>
+      <div class="field span2"><label>Proje adı *</label><input name="name" required value="{{ project.name or '' }}"></div>{% endif %}
       <div class="field span3"><label>Diğer adlar (dokümanlarda geçen farklı isimler, virgülle)</label><input name="aliases" value="{{ project.aliases or '' }}" placeholder="ör. Parça tahminleme, Demand Forecast"><div class="small muted" style="margin-top:3px">AI ve eşleştirme bu adları görünce dokümanı bu projeye bağlar.</div></div>
       <div class="field span3"><label>Etiketler (virgülle)</label><input name="tags" value="{{ project.tags or '' }}" placeholder="ör. AI Impact, 3rd Party Firma, Dependent"></div>
       <div class="field span3"><label>Kısa özet</label><textarea name="summary" rows="2">{{ project.summary or '' }}</textarea></div>
       <div class="field span3"><label>Problem / fırsat</label><textarea name="problem">{{ project.problem or '' }}</textarea></div>
       <div class="field span3"><label>Önerilen çözüm</label><textarea name="solution">{{ project.solution or '' }}</textarea></div>
-      <div class="field"><label>Departman</label><select name="department_id"><option value="">—</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if project.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select><div class="small muted" style="margin-top:3px"><a href="/ayarlar#departmanlar">Departmanları düzenle</a></div></div>
+      <div class="field"><label>Departman</label><select name="department_id"><option value="">—</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if project.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select><div class="small muted" style="margin-top:3px">Boş bırakırsanız seçilen markanın departmanı atanır.</div></div>
+      <div class="field span3"><label>Markalar</label>
+        <div class="brand-picker">{% for g in brand_groups %}<div class="bp-group"><div class="bp-dept">{{ g.dept.name }}</div>
+          {% for b in g.brands %}<label class="chipcheck"><input type="checkbox" name="brand_ids" value="{{ b.id }}" {{ 'checked' if b.id in selected_brands }}><span>{{ b.name }}</span></label>{% endfor %}</div>{% endfor %}
+          {% if not brand_groups %}<span class="small muted">Marka tanımlı değil — <a href="/ayarlar#departmanlar">Ayarlar</a></span>{% endif %}</div></div>
       <div class="field"><label>İş birimi</label><input name="business_unit" value="{{ project.business_unit or '' }}"></div>
-      <div class="field"><label>Markalar</label><input name="brands" value="{{ project.brands or '' }}" placeholder="ör. Volkswagen, Audi"></div>
+
       <div class="field"><label>AI tipi</label><select name="ai_type"><option value="">—</option>{{ opt(D.AI_TYPES, project.ai_type) }}</select></div>
       <div class="field"><label>Öncelik</label><select name="priority">{{ opt(D.PRIORITIES, project.priority) }}</select></div>
       {% if not project.id %}<div class="field"><label>Başlangıç aşaması</label><select name="stage">{% for k, l, _ in D.STAGES %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>{% endif %}

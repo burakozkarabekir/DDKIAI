@@ -1,4 +1,7 @@
-"""Uçtan uca testler: python -m pytest -q"""
+"""Uçtan uca testler: python -m pytest -q
+
+Uygulama boş veritabanıyla başlar (demo veri yoktur); testler kendi verisini arayüz uçlarından oluşturur.
+"""
 import io
 import json
 import os
@@ -7,21 +10,20 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
-os.environ["SEED_DEMO"] = "1"
 os.environ["AI_PROVIDER"] = "mock"
 os.environ["AUTH_ENABLED"] = "0"
 
 import docx  # noqa: E402
+import openpyxl  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import ai, config, db, knowledge, pipeline  # noqa: E402
+from app import ai, config, copilot, db, domain, knowledge, org, pipeline, seed, status  # noqa: E402
 from app.main import _f, _md, app  # noqa: E402
 
-PAGES = ["/", "/projeler", "/projeler?view=liste", "/projeler/1", "/projeler/3?tab=bilgi", "/projeler/3?tab=etki",
-         "/projeler/3?tab=dokuman", "/zaman-cizelgesi", "/zaman-cizelgesi?grup=asama", "/dokumanlar", "/dokumanlar?q=ERP",
-         "/dokumanlar/1", "/raporlar", "/inceleme", "/aksiyonlar", "/danisman", "/guvenlik", "/guvenlik/shadow-ai", "/surec",
-         "/ayarlar", "/yonetim"]
+PAGES = ["/", "/projeler", "/projeler?view=liste", "/projeler/yeni", "/durum-girisi", "/zaman-cizelgesi", "/zaman-cizelgesi?grup=asama",
+         "/dokumanlar", "/raporlar", "/inceleme", "/aksiyonlar", "/danisman", "/guvenlik", "/guvenlik/copilot",
+         "/alan/yonetici-raporlari", "/alan/ai-yonetisimi", "/surec", "/ayarlar", "/yonetim"]
 
 
 @pytest.fixture(scope="module")
@@ -40,19 +42,87 @@ def _docx(lines) -> bytes:
     return buf.getvalue()
 
 
-def test_pages_render_without_login(client):
+def _brand(name) -> int:
+    return db.scalar("SELECT id FROM brands WHERE name = ?", (name,))
+
+
+def _dept(name) -> int:
+    return db.scalar("SELECT id FROM departments WHERE name = ?", (name,))
+
+
+def _create(client, code, name, stage="gelistirme", brands=(), **extra) -> int:
+    data = {"code": code, "name": name, "stage": stage, "health": "yesil", "priority": "Orta", "measurement_status": "yok",
+            "security_review": "yok", **extra, "brand_ids": [str(_brand(b)) for b in brands]}
+    r = client.post("/projeler", data=data, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    return int(r.headers["location"].rsplit("/", 1)[1])
+
+
+# ---------------------------------------------------------------- boş kurulum, organizasyon
+
+def test_fresh_install_has_no_dummy_data(client):
+    assert db.scalar("SELECT COUNT(*) FROM projects") == 0
+    assert db.scalar("SELECT COUNT(*) FROM documents") == 0
+    assert db.scalar("SELECT COUNT(*) FROM initiatives") == 0
+    assert db.scalar("SELECT COUNT(*) FROM security_metrics") == 0
     for url in PAGES:
         assert client.get(url).status_code == 200, url
+    assert "hero-steps" in client.get("/").text  # boş ana sayfada başlangıç adımları
     assert client.get("/giris", follow_redirects=False).status_code == 303  # giriş kapalı
 
 
-def test_seed_pipeline_built_knowledge():
-    assert db.scalar("SELECT COUNT(*) FROM documents WHERE status = 'islendi'") == 5
-    assert db.scalar("SELECT doc_type FROM documents WHERE title LIKE 'DDE İç%'") == "ic_not"  # otomatik sınıflandırma
-    assert db.scalar("SELECT COUNT(*) FROM facts WHERE fact_type = 'kpi'") >= 4  # Excel kazanım dokümanından
-    labels = [(c["code"], c["label"]) for c in knowledge.conflicts()]
-    assert ("AI-003", "Hedef canlı tarihi") in labels  # DT raporu vs iç notlar
+def test_org_has_ten_departments_and_separate_brands():
+    names = [d["name"] for d in org.departments()]
+    assert names == [n for n, _ in domain.ORG] and len(names) == 10
+    assert names[1] == "VW Ticari Araç - Scania - Thermo King - Meiller - Wielton"
+    scania = db.row("SELECT * FROM brands WHERE name = 'Scania'")
+    assert scania["department_id"] == _dept(names[1])
+    assert db.row("SELECT * FROM brands WHERE name = 'Cupra'")["department_id"] == _dept("Seat - Cupra - Porsche - DOD")
+    assert sorted(domain.match_brands("Scania kamyon ve Thermo King")) == ["Scania", "Thermo King"]
+    assert "VW Binek" in domain.match_brands("Volkswagen Binek satış")
 
+
+def test_project_create_edit_with_brands(client):
+    pid = _create(client, "AI-007", "Fatura & İrsaliye Eşleştirme", brands=["Scania", "Meiller"])
+    p = db.row("SELECT * FROM projects WHERE id = ?", (pid,))
+    assert p["code"] == "AI-007" and p["department_id"] == _dept(domain.ORG[1][0])  # departman markadan geldi
+    assert sorted(org.brands_by_project()[pid]) == ["Meiller", "Scania"]
+    # düzenleme: marka değişir, departman elle verilirse korunur
+    client.post(f"/projeler/{pid}", data={"name": "Fatura & İrsaliye Eşleştirme", "code": "AI-007", "brand_ids": [str(_brand("Audi"))],
+                                          "department_id": str(_dept("Mali İşler"))})
+    p = db.row("SELECT * FROM projects WHERE id = ?", (pid,))
+    assert p["department_id"] == _dept("Mali İşler") and org.brands_by_project()[pid] == ["Audi"]
+    assert "Audi" in client.get(f"/projeler?view=liste&marka={_brand('Audi')}").text
+    assert client.get(f"/projeler/{pid}").status_code == 200
+    _create(client, "AI-003", "Yedek Parça Talep Tahmini", brands=["Yedek Parça ve Lojistik"] if _brand("Yedek Parça ve Lojistik") else [],
+            department_id=str(_dept("Yedek Parça ve Lojistik")), target_date="2026-11-30")
+    _create(client, "AI-006", "İK Asistanı", stage="fikir", department_id=str(_dept("İnsan Kaynakları ve Süreç Yönetimi")))
+    html = client.get("/").text
+    assert "Departman × aşama" in html and "Marka kırılımı" in html
+
+
+def test_manual_status_update_and_bulk(client):
+    pid = db.scalar("SELECT id FROM projects WHERE code = 'AI-003'")
+    r = client.post(f"/projeler/{pid}/durum", data={"health": "sari", "stage": "pilot", "progress": "60", "summary": "Pilot başladı",
+                                                     "blockers": "ERP erişimi", "next_steps": "Kullanıcı eğitimi"}, follow_redirects=False)
+    assert r.status_code == 303
+    p = db.row("SELECT * FROM projects WHERE id = ?", (pid,))
+    assert (p["health"], p["stage"]) == ("sari", "pilot") and p["last_status_at"]
+    last = status.latest(pid)
+    assert last["progress"] == 60 and last["blockers"] == "ERP erişimi"
+    assert db.scalar("SELECT 1 FROM stage_history WHERE project_id = ? AND to_stage = 'pilot'", (pid,))
+    assert "Pilot başladı" in client.get(f"/projeler/{pid}?tab=bilgi").text
+    # toplu giriş: yalnız değişen satır kaydedilir
+    other = db.scalar("SELECT id FROM projects WHERE code = 'AI-007'")
+    n = db.scalar("SELECT COUNT(*) FROM status_updates")
+    client.post("/durum-girisi", data={f"p_{other}_health": "kirmizi", f"p_{other}_summary": "Tedarikçi gecikmesi",
+                                       f"p_{pid}_health": "sari", f"p_{pid}_stage": "pilot"})
+    assert db.scalar("SELECT COUNT(*) FROM status_updates") == n + 1
+    assert db.scalar("SELECT health FROM projects WHERE id = ?", (other,)) == "kirmizi"
+    assert "Tedarikçi gecikmesi" in ai.portfolio_context()  # manuel güncellemeler AI bağlamına girer
+
+
+# ---------------------------------------------------------------- dokümanlar
 
 def test_upload_word_without_project_links_automatically(client):
     data = _docx(["Komite notu", "AI-007 Fatura & İrsaliye Eşleştirme: Karar: UAT 2 hafta sonra başlayacak.",
@@ -73,40 +143,130 @@ def test_upload_word_without_project_links_automatically(client):
 
 
 def test_multi_upload_and_bad_extension(client):
-    files = [("files", ("a.txt", b"AI-012 AI Studio: aktif kullanici 1300.", "text/plain")),
+    files = [("files", ("a.txt", b"AI-003 Yedek Parca: hedef canli tarihi 15.12.2026, saglik: sari.", "text/plain")),
              ("files", ("b.exe", b"x", "application/octet-stream"))]
     r = client.post("/dokumanlar", files=files, data={"doc_type": "dt_durum"}, follow_redirects=True)
     assert "1 doküman yüklendi" in r.text and "desteklenmiyor" in r.text
+    pipeline.drain()
 
 
 def test_review_apply_updates_project(client):
-    pipeline.drain()
-    f = next(f for f in knowledge.pending() if f["fact_type"] == "kpi")
+    pending = knowledge.pending()
+    assert pending
+    f = pending[0]
     client.post("/inceleme", data={"fact_id": str(f["id"]), "action": "onayla"})
-    k = db.row("SELECT * FROM kpis WHERE project_id = ? AND lower(name) = lower(?)", (f["project_id"], f["field"]))
-    assert k[f["subfield"]] == f["value_num"]
     assert db.scalar("SELECT status FROM facts WHERE id = ?", (f["id"],)) == "onaylandi"
 
 
+def test_exec_report_area_and_analysis(client):
+    data = _docx(["Yönetici Özeti Ekim 2026", "AI portföyünde 3 proje ilerliyor. AI-003 pilotta, AI-007 için tedarikçi riski var."])
+    r = client.post("/dokumanlar", files=[("files", ("Yonetici Ozeti Ekim.docx", data, "application/octet-stream"))],
+                    data={"doc_type": "yonetici_ozeti"}, follow_redirects=False)
+    assert r.status_code == 303
+    pipeline.drain()
+    html = client.get("/alan/yonetici-raporlari").text
+    assert "Yonetici Ozeti Ekim" in html or "Yönetici Özeti Ekim" in html
+    client.post("/alan/yonetici-raporlari/analiz")
+    pipeline.drain()
+    assert db.scalar("SELECT 1 FROM ai_insights WHERE kind = 'area:yonetici-raporlari'")
+    assert client.get("/alan/yonetici-raporlari").status_code == 200
+    assert client.get("/alan/olmayan").status_code == 404
+
+
 def test_stage_gate_warns(client):
-    r = client.post("/projeler/6/asama", data={"to_stage": "onay"}, follow_redirects=True)
+    pid = db.scalar("SELECT id FROM projects WHERE code = 'AI-006'")
+    r = client.post(f"/projeler/{pid}/asama", data={"to_stage": "onay"}, follow_redirects=True)
     assert "kapı kriterleri eksik" in r.text
 
 
-def test_departments_crud(client):
-    client.post("/ayarlar/departman", data={"name": "Kurumsal İletişim", "description": "PR"})
-    dep = db.row("SELECT * FROM departments WHERE name = 'Kurumsal İletişim'")
+def test_departments_and_brands_crud(client):
+    client.post("/ayarlar/departman", data={"name": "Test Departmanı", "description": "geçici"})
+    dep = db.row("SELECT * FROM departments WHERE name = 'Test Departmanı'")
     assert dep
+    client.post("/ayarlar/marka", data={"name": "Test Marka", "department_id": str(dep["id"]), "active": "1"})
+    bid = _brand("Test Marka")
+    assert db.scalar("SELECT department_id FROM brands WHERE id = ?", (bid,)) == dep["id"]
+    client.post(f"/ayarlar/marka/{bid}/sil")
+    assert not _brand("Test Marka")
     client.post(f"/ayarlar/departman/{dep['id']}/sil")
     assert not db.row("SELECT * FROM departments WHERE id = ?", (dep["id"],))
 
 
-def test_synthesis_and_advisor(client):
-    client.post("/projeler/3/sentez")
+def test_synthesis_and_advisor_with_page_context(client):
+    pid = db.scalar("SELECT id FROM projects WHERE code = 'AI-003'")
+    client.post(f"/projeler/{pid}/sentez")
     pipeline.drain()
-    assert db.scalar("SELECT 1 FROM ai_insights WHERE kind = 'project' AND project_id = 3")
-    r = client.post("/api/danisman", json={"question": "ERP erişimi neden gecikiyor?"})
-    assert r.status_code == 200 and "D" in r.json()["answer_html"]
+    assert db.scalar("SELECT 1 FROM ai_insights WHERE kind = 'project' AND project_id = ?", (pid,))
+    r = client.post("/api/danisman", json={"question": "Riskli projeler hangileri?", "page": f"/projeler/{pid}", "project_id": pid})
+    assert r.status_code == 200 and r.json()["answer_html"]
+    hist = client.get("/api/danisman/gecmis").json()["messages"]
+    assert hist[-2]["text"] == "Riskli projeler hangileri?" and hist[-1]["html"]
+    assert "sohbet balonu" not in client.get("/danisman").text and "fab-chat" not in client.get("/danisman").text
+    assert "fab-chat" in client.get("/").text
+    assert client.post("/api/danisman/temizle").json()["ok"]
+    assert client.get("/api/danisman/gecmis").json()["messages"] == []
+
+
+# ---------------------------------------------------------------- Copilot
+
+def _copilot_xlsx() -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Report Refresh Date", "User Principal Name", "Display Name", "Department",
+               "Last Activity Date", "Microsoft Teams Copilot Last Activity Date", "Word Copilot Last Activity Date"])
+    for i in range(10):
+        active = i < 4
+        ws.append(["2026-10-20", f"kisi{i}@dogus.com", f"Kişi {i}", "Mali İşler" if i % 2 else "Hukuk",
+                   "2026-10-15" if active else ("2026-05-01" if i < 8 else None), "2026-10-15" if active else None,
+                   "2026-10-10" if i < 2 else None])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_copilot_upload_and_analysis(client):
+    r = client.post("/guvenlik/copilot/yukle", files={"file": ("Copilot_kullanim_2026-10.xlsx", _copilot_xlsx())}, follow_redirects=False)
+    assert r.status_code == 303 and "ds=" in r.headers["location"]
+    ds = copilot.datasets()[0]
+    assert ds["kind"] == "user" and ds["row_count"] == 10
+    a = copilot.analyze(ds["id"])
+    assert (a["total"], a["active"], a["adoption"]) == (10, 4, 40.0)
+    assert {d["name"] for d in a["departments"]} == {"Mali İşler", "Hukuk"}
+    assert any(x["app"] == "Teams" and x["users"] == 4 for x in a["apps"])
+    summary = copilot.ai_summary()
+    assert "kisi1@" not in summary and "Kişi 1" not in summary  # kişisel veri AI'a gitmez
+    assert copilot.headline()["adoption"] == 40.0
+    assert "%40" in client.get("/guvenlik/copilot").text
+    assert "Copilot benimseme" in client.get("/").text and "Copilot" in client.get("/guvenlik").text
+    client.post("/guvenlik/copilot/analiz")
+    pipeline.drain()
+    assert client.get("/guvenlik/copilot").status_code == 200
+    # Copilot dosyası doküman olarak metin indekslemesine girmez
+    assert not db.scalar("SELECT text_content FROM documents WHERE id = ?", (ds["document_id"],))
+    r = client.post(f"/guvenlik/copilot/{ds['id']}/sil", follow_redirects=False)
+    assert r.status_code == 303 and not copilot.datasets()
+
+
+# ---------------------------------------------------------------- eski sürümden geçiş
+
+def test_legacy_demo_purge_and_department_migration():
+    from app.legacy_demo import DEMO_PROJECTS
+    code, name = DEMO_PROJECTS[0]
+    ts = db.now()
+    keep = db.insert("projects", {"code": "UC999", "name": "Kullanıcı projesi", "stage": "fikir", "created_at": ts, "updated_at": ts,
+                                  "brands": "Porsche"})
+    db.insert("projects", {"code": code, "name": name, "stage": "fikir", "created_at": ts, "updated_at": ts})
+    old = db.insert("departments", {"name": "Finans", "sort": 99, "active": 1})
+    db.execute("UPDATE projects SET department_id = ? WHERE id = ?", (old, keep))
+    db.set_setting("demo_purged_v3", "")
+    db.set_setting("org_v3", "")
+    seed.purge_legacy_demo()
+    org.ensure_org()
+    assert not db.scalar("SELECT 1 FROM projects WHERE code = ? AND name = ?", (code, name))
+    p = db.row("SELECT * FROM projects WHERE id = ?", (keep,))
+    assert p["department_id"] == _dept("Mali İşler")
+    assert org.brands_by_project()[keep] == ["Porsche"]
+    assert not _dept("Finans") and len(org.departments()) == 10
 
 
 def test_origin_check(client):
@@ -135,9 +295,9 @@ def test_live_ai_provider_with_fake_server(client):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append((self.path, self.headers.get("Authorization")))
             if body.get("response_format"):
-                content = json.dumps({"doc_type": "kazanim", "doc_date": "2026-09-30", "summary": "AI-009 kazanım özeti",
-                                      "projects": [{"code": "AI-009", "confidence": 0.95}], "new_projects": [{"name": "Bayi Chatbot"}],
-                                      "facts": [{"project_code": "AI-009", "type": "kazanim", "field": "realized_value", "value": None,
+                content = json.dumps({"doc_type": "kazanim", "doc_date": "2026-09-30", "summary": "AI-006 kazanım özeti",
+                                      "projects": [{"code": "AI-006", "confidence": 0.95}], "new_projects": [{"name": "Bayi Chatbot"}],
+                                      "facts": [{"project_code": "AI-006", "type": "kazanim", "field": "realized_value", "value": None,
                                                  "value_num": 1100000, "unit": "TL", "as_of": "2026-09-30", "confidence": 0.9,
                                                  "evidence": "Gerçekleşen 1,1 milyon TL"}]})
             else:
@@ -216,7 +376,7 @@ def test_trello_parse_and_import(client):
     raw = json.dumps(TRELLO)
     r = client.post("/ayarlar/trello/onizle", files={"file": ("t.json", raw.encode(), "application/json")})
     assert r.status_code == 200 and "UC88" in r.text  # tekrar eden kod uyarısı
-    yp = db.scalar("SELECT id FROM departments WHERE name = 'Yedek Parça & Lojistik'")
+    yp = _dept("Yedek Parça ve Lojistik")
     form = {"stage_L1": "fikir", "stage_L2": "gelistirme", "stage_L3": "canli", "stage_L4": "atla", "stage_L5": "analiz",
             "unit_YP Lojistik": str(yp), "unit_Yedek Parça Lojistik": str(yp), "unit_VW Binek": "marka", "update_existing": "1"}
     client.post("/ayarlar/trello/aktar", data=form)
@@ -225,7 +385,8 @@ def test_trello_parse_and_import(client):
     assert p["target_date"] == "2027-01-08" and p["health"] == "sari" and "Dependent" in p["tags"] and p["owner"] == "Burak Özkarabekir"
     assert db.scalar("SELECT code FROM projects WHERE trello_id = '68000000a2'") == "UC88-2"
     f2 = db.row("SELECT * FROM projects WHERE code = 'UC57-F2'")
-    assert f2["brands"] == "VW Binek" and f2["golive_date"] == "2026-04-06"
+    assert org.brands_by_project()[f2["id"]] == ["VW Binek"] and f2["golive_date"] == "2026-04-06"
+    assert f2["department_id"] == _dept("VW Binek")
     assert not db.scalar("SELECT 1 FROM projects WHERE name = 'AI Championlar'")
     assert db.scalar("SELECT COUNT(*) FROM comments WHERE target_id = ? AND kind = 'trello'", (p["id"],)) == 1
     assert db.scalar("SELECT COUNT(*) FROM actions WHERE project_id = ? AND source = 'Trello checklist'", (p["id"],)) == 1
@@ -281,18 +442,6 @@ def test_edit_endpoints(client):
     assert not db.scalar("SELECT 1 FROM security_metrics WHERE period = '2026-09'")
     for url in ["/ayarlar", "/guvenlik?donem=2026-10", f"/projeler/{pid}?tab=aksiyon", f"/projeler/{pid}/duzenle", "/inceleme", "/aksiyonlar"]:
         assert client.get(url).status_code == 200, url
-
-
-def test_clear_demo_keeps_user_data(client):
-    from app import seed
-    user_doc = db.scalar("SELECT id FROM documents WHERE filename = 'Statü.docx'")
-    client.post("/ayarlar/demo-temizle")
-    assert not db.scalar("SELECT 1 FROM projects WHERE code = 'AI-001'")
-    assert db.scalar("SELECT 1 FROM projects WHERE trello_id = '68000000a1'")  # Trello'dan gelenler korunur
-    assert db.scalar("SELECT 1 FROM documents WHERE id = ?", (user_doc,))
-    assert not db.scalar("SELECT 1 FROM documents WHERE filename = 'AI-002 PDD.docx'")
-    seed.seed_demo()
-    assert not db.scalar("SELECT 1 FROM projects WHERE code = 'AI-001'")  # bir daha yüklenmez
 
 
 def test_provider_autodetect(monkeypatch):

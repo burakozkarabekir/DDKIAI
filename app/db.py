@@ -29,6 +29,15 @@ CREATE TABLE IF NOT EXISTS departments (
     active INTEGER NOT NULL DEFAULT 1
 );
 
+-- Markalar departmanlara bağlıdır (ör. Scania → "VW Ticari Araç - Scania - …"). Bir proje birden çok markaya ait olabilir.
+CREATE TABLE IF NOT EXISTS brands (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+    sort INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
@@ -66,6 +75,48 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS project_brands (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    brand_id INTEGER NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
+    PRIMARY KEY (project_id, brand_id)
+);
+
+-- Elle girilen durum güncellemeleri (proje sayfası ya da toplu haftalık durum girişi)
+CREATE TABLE IF NOT EXISTS status_updates (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    stage TEXT,
+    health TEXT,
+    progress INTEGER,
+    summary TEXT,
+    blockers TEXT,
+    next_steps TEXT,
+    target_date TEXT,
+    user_id INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_status_updates ON status_updates(project_id, created_at);
+
+-- Copilot kullanım Excel'leri: her yükleme bir veri seti, satırlar JSON olarak (sütun rolleri ayrıca tutulur)
+CREATE TABLE IF NOT EXISTS copilot_datasets (
+    id INTEGER PRIMARY KEY,
+    document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    period TEXT,
+    sheet TEXT,
+    kind TEXT NOT NULL DEFAULT 'user',              -- user (kişi bazında) | aggregate (özet tablo)
+    columns TEXT NOT NULL,                          -- [{"name": ..., "role": ...}]
+    row_count INTEGER NOT NULL DEFAULT 0,
+    refresh_date TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS copilot_rows (
+    id INTEGER PRIMARY KEY,
+    dataset_id INTEGER NOT NULL REFERENCES copilot_datasets(id) ON DELETE CASCADE,
+    data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_copilot_rows ON copilot_rows(dataset_id);
 
 CREATE TABLE IF NOT EXISTS kpis (
     id INTEGER PRIMARY KEY,

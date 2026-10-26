@@ -126,6 +126,13 @@ def process_document(doc_id: int) -> None:
         return
     if doc["type_source"] != "kullanici":
         db.update("documents", doc_id, {"doc_type": ai.guess_type(doc["filename"], text), "type_source": "kural"})
+    if db.scalar("SELECT doc_type FROM documents WHERE id = ?", (doc_id,)) == "copilot":  # kişisel veri içerir; metin AI'a gönderilmez, Copilot modülünde analiz edilir
+        db.update("documents", doc_id, {"status": "islendi", "processed_at": db.now(), "ai_mode": "live" if ai.is_live() else "mock",
+                                        "text_content": None,
+                                        "summary": "Copilot kullanım raporu — AI Security > Copilot Kullanımı sayfasında analiz edilir."})
+        from .copilot import import_document
+        import_document(doc_id)
+        return
     knowledge.index_document(doc_id, sections)
 
     doc = db.row("SELECT * FROM documents WHERE id = ?", (doc_id,))
@@ -220,7 +227,19 @@ def gap_insight(_ref=None) -> None:
     db.insert("ai_insights", {"kind": "gap", "title": "AI Olgunluk ve Boşluk Analizi", "body": ai.gap_analysis(), "created_at": db.now()})
 
 
-HANDLERS = {"document": process_document, "weekly": weekly_insight, "synthesis": project_synthesis, "gap": gap_insight}
+def area_insight(idx: int) -> None:
+    from .domain import DOC_AREAS
+    key = list(DOC_AREAS)[idx]
+    db.insert("ai_insights", {"kind": f"area:{key}", "title": f"{DOC_AREAS[key]['title']} analizi", "body": ai.area_analysis(key),
+                              "created_at": db.now()})
+
+
+def copilot_insight(_ref=None) -> None:
+    from .copilot import ai_analysis
+    db.insert("ai_insights", {"kind": "copilot", "title": "Copilot kullanım analizi", "body": ai_analysis(), "created_at": db.now()})
+
+
+HANDLERS = {"copilot": copilot_insight, "area": area_insight, "document": process_document, "weekly": weekly_insight, "synthesis": project_synthesis, "gap": gap_insight}
 
 
 def reprocess_all(only_mock: bool = False) -> int:

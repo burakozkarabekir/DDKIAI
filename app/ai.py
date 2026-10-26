@@ -308,6 +308,12 @@ def portfolio_context() -> str:
             f"Özet: {(p['summary'] or '')[:300]}\nKPI'lar: {kp}"
             + (f"\nSon risk notu (skor {p['ai_risk_score']}): {p['ai_risk_note'][:250]}" if p["ai_risk_note"] else "")
         )
+    from . import status as _status
+    last = _status.latest_by_project()
+    manual = [f"- {p['code']}: {_status.as_text(last[p['id']])}" for p in projects if p["id"] in last]
+    if manual:
+        lines.append("\n# Son manuel durum güncellemeleri")
+        lines += manual
     acts = db.rows("SELECT a.*, p.code FROM actions a LEFT JOIN projects p ON p.id = a.project_id WHERE a.status = 'acik'")
     if acts:
         lines.append("\n# Açık aksiyonlar")
@@ -434,6 +440,8 @@ def extract_document(doc: dict, text: str) -> dict:
 # --- demo modu: kural tabanlı çıkarım ------------------------------------------------
 
 _TYPE_HINTS = [
+    ("yonetici_ozeti", ("yönetici özeti", "yonetici ozeti", "executive summary", "yönetim raporu", "gm raporu", "genel müdür")),
+    ("yonetisim", ("yönetişim", "governance", "politika", "policy", "kullanım standardı", "prosedür", "procedure", "komite tüzüğü")),
     ("dt_durum", ("durum raporu", "haftalık rapor", "status report", "haftalik", "durum_raporu", "weekly")),
     ("kazanim", ("kazanım", "kazanim", "fayda", "benefit", "tasarruf")),
     ("pdd", ("pdd", "proje tanım", "project definition")),
@@ -457,6 +465,8 @@ _RISK_WORDS = {
 
 def guess_type(filename: str, text: str) -> str:
     """Önce dosya adına, sonra metnin başına bakar (dosya adı genelde daha güvenilir)."""
+    if "copilot" in filename.lower() and filename.lower().rsplit(".", 1)[-1] in ("xlsx", "xlsm", "xls", "csv"):
+        return "copilot"
     for hay in (knowledge.norm(filename), knowledge.norm(text[:1500])):
         for t, words in _TYPE_HINTS:
             if any(knowledge.norm(w) in hay for w in words):
@@ -639,7 +649,10 @@ def project_synthesis(project_id: int) -> str:
                                 for c in chunks)
         comments = db.rows("SELECT c.body, u.name, c.created_at FROM comments c JOIN users u ON u.id = c.user_id "
                            "WHERE target_type = 'project' AND target_id = ? AND kind NOT IN ('ai') ORDER BY c.id DESC LIMIT 15", (project_id,))
+        from . import status as _status
+        manual = "\n".join(_status.as_text(x) for x in _status.history(project_id, 20)) or "yok"
         content = (f"{SYNTH_PROMPT}\n\n=== PROJE KAYDI ===\n{json.dumps(p, ensure_ascii=False, default=str)}\nKPI: {json.dumps(kpis, ensure_ascii=False)}\n\n"
+                   f"=== ELLE GİRİLEN DURUM GÜNCELLEMELERİ (yeniden eskiye) ===\n{manual}\n\n"
                    f"=== ÇIKARILMIŞ BİLGİLER (yeniden eskiye) ===\n{knowledge.facts_json(project_id)}\n\n"
                    f"=== YORUMLAR ===\n{json.dumps(comments, ensure_ascii=False)}\n\n=== DOKÜMAN PARÇALARI ===\n{docs_text}")
         return complete([{"role": "user", "content": _trim(content)}], max_tokens=3000)
@@ -693,13 +706,19 @@ def portfolio_weekly() -> str:
     facts = db.rows("SELECT f.*, p.code, d.doc_type, d.title, d.doc_date FROM facts f JOIN projects p ON p.id = f.project_id "
                     "JOIN documents d ON d.id = f.document_id WHERE COALESCE(d.doc_date, substr(d.uploaded_at, 1, 10)) >= ? "
                     "AND f.status != 'reddedildi' ORDER BY p.code", (since,))
-    mentioned = {f["code"] for f in facts}
+    mentioned = {f["code"] for f in facts} | {r["code"] for r in db.rows(
+        "SELECT DISTINCT p.code FROM status_updates s JOIN projects p ON p.id = s.project_id WHERE s.created_at >= ?", (since,))}
     active = [r["code"] for r in db.rows("SELECT code, stage FROM projects") if r["stage"] in ACTIVE_STAGES]
     missing = [c for c in active if c not in mentioned]
     if is_live():
         rows = [f"[D{f['document_id']}] {f['code']} · {DOC_TYPES[f['doc_type']][0]} · {f['fact_type']} · "
                 f"{knowledge.display_value(f)} · {(f['evidence'] or '')[:160]}" for f in facts]
         content = f"{WEEKLY_PROMPT}\n\n{_trim(portfolio_context(), 30000)}\n\n=== SON 14 GÜNÜN BİLGİLERİ ===\n" + "\n".join(rows)
+        from . import status as _status
+        recent = db.rows("SELECT s.*, p.code FROM status_updates s JOIN projects p ON p.id = s.project_id WHERE s.created_at >= ? "
+                         "ORDER BY s.created_at DESC", (since,))
+        if recent:
+            content += "\n\n=== SON 14 GÜNÜN MANUEL DURUM GÜNCELLEMELERİ ===\n" + "\n".join(f"{r['code']}: {_status.as_text(r)}" for r in recent)
         content += f"\n\nRaporda/notlarda geçmeyen aktif projeler: {', '.join(missing) or 'yok'}"
         return complete([{"role": "user", "content": _trim(content)}], max_tokens=3000)
     risky = sorted({(f["code"], f["value_num"] or 0, f["document_id"]) for f in facts if f["fact_type"] == "saglik" and f["value_text"] != "yesil"},
@@ -713,6 +732,35 @@ def portfolio_weekly() -> str:
     lines += [f"- **{f['code']}**: {knowledge.display_value(f)[:200]} [D{f['document_id']}]" for f in notes[:5]] or ["- Bu dönem iç not yüklenmedi."]
     lines.append("\n## Raporda hiç geçmeyen aktif projeler")
     lines.append(f"- {', '.join(missing)} — DT'den durum istenmeli." if missing else "- Yok.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 3b) doküman alanı analizi
+
+def area_analysis(key: str) -> str:
+    from .domain import DOC_AREAS
+    area = DOC_AREAS[key]
+    docs = db.rows(f"SELECT * FROM documents WHERE doc_type IN ({','.join('?' * len(area['types']))}) "
+                   "ORDER BY COALESCE(doc_date, substr(uploaded_at, 1, 10))", tuple(area["types"]))
+    if not docs:
+        return "Bu alanda henüz doküman yok."
+    if is_live():
+        per_doc = max(4000, (config.AI_MAX_CONTEXT_CHARS - 25000) // max(1, len(docs)))
+        body = "\n\n".join(f"[D{d['id']}] {d['title']} ({d['doc_date'] or d['uploaded_at'][:10]})\n{(d['text_content'] or d['summary'] or '')[:per_doc]}"
+                            for d in docs[-12:])
+        extra = security_context()
+        if key == "ai-yonetisimi":
+            from .copilot import ai_summary
+            extra += "\n\n" + ai_summary()
+        content = f"{area['prompt']}\n\n=== DOKÜMANLAR ===\n{body}\n\n{_trim(portfolio_context(), 20000)}\n\n{extra}"
+        return complete([{"role": "user", "content": _trim(content)}], max_tokens=4000)
+    lines = ["> *AI bağlı değil: kural tabanlı özet. AI bağlanınca dokümanlar birlikte yorumlanır.*", f"## {area['title']} · {len(docs)} doküman"]
+    for d in docs[-12:]:
+        lines.append(f"- [D{d['id']}] **{d['title']}** ({d['doc_date'] or d['uploaded_at'][:10]}) — {(d['summary'] or 'özet yok')[:220]}")
+    if key == "ai-yonetisimi":
+        no_sec = db.rows("SELECT code FROM projects WHERE stage IN ('pilot','canli','olcekleme') AND security_review = 'yok'")
+        if no_sec:
+            lines.append("\n## Güvenlik değerlendirmesi olmadan ilerleyen projeler\n" + ", ".join(f"**{r['code']}**" for r in no_sec))
     return "\n".join(lines)
 
 
@@ -763,21 +811,44 @@ def gap_analysis() -> str:
 
 # ---------------------------------------------------------------- 5) danışman
 
-def advisor_answer(history: list[dict], question: str) -> tuple[str, list[dict]]:
-    """Dönüş: (yanıt, kullanılan kaynak parçaları)"""
+def page_context(page: str | None) -> str:
+    """Sağ alttaki sohbet balonu hangi sayfadan açıldıysa o sayfanın verisini bağlama ekler."""
+    page = page or ""
+    if page.startswith("/guvenlik/copilot"):
+        from . import copilot
+        return "=== KULLANICININ BAKTIĞI SAYFA: Copilot kullanım metrikleri ===\n" + copilot.ai_summary()
+    m = re.match(r"^/alan/([\w-]+)", page)
+    from .domain import DOC_AREAS
+    if m and m.group(1) in DOC_AREAS:
+        area = DOC_AREAS[m.group(1)]
+        docs = db.rows(f"SELECT id, title, doc_type, doc_date, summary FROM documents WHERE doc_type IN ({','.join('?' * len(area['types']))}) "
+                       "ORDER BY COALESCE(doc_date, uploaded_at) DESC LIMIT 15", tuple(area["types"]))
+        return (f"=== KULLANICININ BAKTIĞI SAYFA: {area['title']} ===\n"
+                + ("\n".join(f"[D{d['id']}] {d['title']} ({d['doc_date'] or '—'}): {(d['summary'] or '')[:600]}" for d in docs) or "doküman yok"))
+    return ""
+
+
+def advisor_answer(history: list[dict], question: str, project_id: int | None = None,
+                   page: str | None = None) -> tuple[str, list[dict]]:
+    """Dönüş: (yanıt, kullanılan kaynak parçaları). project_id/page: sohbetin açıldığı sayfa."""
     codes = {r["code"].upper(): r["id"] for r in db.rows("SELECT id, code FROM projects")}
     asked = [codes[c.upper()] for c in re.findall(r"\b[A-Za-z]{2,4}-\d{1,4}\b", question) if c.upper() in codes]
+    if project_id and project_id in codes.values() and project_id not in asked:
+        asked.append(project_id)
     hits = knowledge.search(question, limit=10, project_ids=asked or None)
     if asked and len(hits) < 6:
         hits += [h for h in knowledge.project_chunks(asked[0], limit=8) if h["id"] not in {x["id"] for x in hits}]
     if is_live():
         sources = "\n\n".join(f"[D{h['document_id']}] {h['title']} ({DOC_TYPES[h['doc_type']][0]}, {h['doc_date'] or '—'})\n{h['text'][:1800]}"
                               for h in hits)
-        facts = "\n".join(knowledge.facts_json(pid, 60) for pid in asked[:3])
+        from . import status as _status
+        facts = "\n".join(knowledge.facts_json(pid, 60) + "\n" + "\n".join(_status.as_text(x) for x in _status.history(pid, 8))
+                          for pid in asked[:3])
         context = ("Aşağıdaki şirket verilerini bağlam olarak kullan. Soru genel AI bilgisiyle ilgiliyse genel bilgini kullan "
                    "ama şirket bağlamına bağla. Doküman kaynaklarını [D<no>] olarak göster.\n\n"
                    f"{_trim(portfolio_context(), 30000)}\n\n{departments_context()}\n\n{security_context()}\n\n"
-                   f"=== İLGİLİ DOKÜMAN PARÇALARI ===\n{sources or 'bulunamadı'}\n\n=== SORUDAKİ PROJELERİN BİLGİLERİ ===\n{facts or '—'}")
+                   f"{page_context(page)}\n\n"
+                   f"=== İLGİLİ DOKÜMAN PARÇALARI ===\n{sources or 'bulunamadı'}\n\n=== SORUDAKİ / AÇIK SAYFADAKİ PROJELERİN BİLGİLERİ ===\n{facts or '—'}")
         msgs = [{"role": "user", "content": _trim(context)}, {"role": "assistant", "content": "Bağlamı aldım. Sorunuzu bekliyorum."}]
         msgs += [{"role": m["role"], "content": m["content"]} for m in history[-8:]]
         msgs.append({"role": "user", "content": question})

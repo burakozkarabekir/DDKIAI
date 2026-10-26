@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from markupsafe import Markup
 
-from .. import ai, charts, config, db, domain, pipeline, security, seed, storage, trello
+from .. import ai, charts, config, copilot, db, domain, org, pipeline, security, seed, storage, trello
 from ..auth import authenticate, hash_password, require_admin, require_editor, require_internal, require_user
 from ..web import flash, md, parse_float, period, redirect, render, templates
 from .projects import comments_for
@@ -23,14 +23,14 @@ router = APIRouter()
 def login_page(request: Request, next: str = "/"):
     if not config.AUTH_ENABLED:
         return redirect("/")
-    return templates.TemplateResponse(request, "login.html", {"next": next, "error": None, "demo": config.SEED_DEMO})
+    return templates.TemplateResponse(request, "login.html", {"next": next, "error": None})
 
 
 @router.post("/giris")
 def login(request: Request, email: str = Form(...), password: str = Form(...), next: str = Form("/")):
     user = authenticate(email, password)
     if not user:
-        return templates.TemplateResponse(request, "login.html", {"next": next, "demo": config.SEED_DEMO,
+        return templates.TemplateResponse(request, "login.html", {"next": next,
                                                                   "error": "E-posta veya parola hatalı (ya da çok fazla deneme)."},
                                           status_code=401)
     request.session.clear()
@@ -69,13 +69,32 @@ async def advisor_ask(request: Request, user=Depends(require_internal)):
         return JSONResponse({"error": "Soru boş"}, status_code=400)
     history = db.rows("SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT 10", (user["id"],))[::-1]
     try:
-        answer, _hits = ai.advisor_answer(history, question)
+        pid = int(payload.get("project_id") or 0) or None
+    except (TypeError, ValueError):
+        pid = None
+    page = str(payload.get("page") or "")[:200]
+    try:
+        answer, _hits = ai.advisor_answer(history, question, project_id=pid, page=page)
     except Exception as exc:
         return JSONResponse({"error": f"AI yanıt veremedi: {exc}"}, status_code=502)
     ts = db.now()
     db.insert("chat_messages", {"user_id": user["id"], "role": "user", "content": question, "created_at": ts})
     db.insert("chat_messages", {"user_id": user["id"], "role": "assistant", "content": answer, "created_at": ts})
     return {"answer_html": str(md(answer))}
+
+
+@router.get("/api/danisman/gecmis")
+def advisor_history(request: Request, user=Depends(require_internal)):
+    """Sağ alttaki sohbet balonu açılınca son konuşmayı getirir."""
+    msgs = db.rows("SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT 12", (user["id"],))[::-1]
+    return {"messages": [{"role": m["role"], "html": str(md(m["content"])) if m["role"] == "assistant" else None,
+                          "text": m["content"] if m["role"] != "assistant" else None} for m in msgs]}
+
+
+@router.post("/api/danisman/temizle")
+def advisor_clear_api(request: Request, user=Depends(require_internal)):
+    db.execute("DELETE FROM chat_messages WHERE user_id = ?", (user["id"],))
+    return {"ok": True}
 
 
 @router.post("/danisman/temizle")
@@ -125,7 +144,7 @@ def security_page(request: Request, user=Depends(require_internal)):
     for r in db.rows("SELECT period, metric, value FROM security_metrics ORDER BY period DESC"):
         table.setdefault(r["period"], {})[r["metric"]] = r["value"]
     return render(request, "security.html", user, groups=groups, initiatives=initiatives, project_sec=project_sec,
-                  periods=security.latest_periods(), metrics=security.METRICS, donem=donem, current=current, table=table)
+                  copilot=copilot.headline(), copilot_sets=len(copilot.datasets()), periods=security.latest_periods(), metrics=security.METRICS, donem=donem, current=current, table=table)
 
 
 @router.post("/guvenlik/metrik/sil")
@@ -237,6 +256,10 @@ def settings_page(request: Request, user=Depends(require_editor)):
 
 def settings(request: Request, user: dict, preview: dict | None = None, test: dict | None = None, probe: str | None = None):
     deps = db.rows("SELECT d.*, (SELECT COUNT(*) FROM projects p WHERE p.department_id = d.id) AS n FROM departments d ORDER BY sort, name")
+    brand_rows = db.rows("SELECT b.*, (SELECT COUNT(*) FROM project_brands pb WHERE pb.brand_id = b.id) AS n FROM brands b ORDER BY sort, name")
+    for d in deps:
+        d["brands"] = [b for b in brand_rows if b["department_id"] == d["id"]]
+    orphan_brands = [b for b in brand_rows if not b["department_id"]]
     ai_cfg = {"provider": config.AI_PROVIDER, "base_url": config.AI_BASE_URL or "—", "model": config.AI_MODEL or "—",
               "key": ("•" * 8 + config.AI_API_KEY[-4:]) if len(config.AI_API_KEY) > 8 else ("tanımlı" if config.AI_API_KEY else "yok"),
               "auth_header": config.AI_AUTH_HEADER or "varsayılan", "context": config.AI_MAX_CONTEXT_CHARS, "timeout": config.AI_TIMEOUT,
@@ -246,19 +269,11 @@ def settings(request: Request, user: dict, preview: dict | None = None, test: di
     docs = db.row("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS size, SUM(status = 'hata') AS failed, "
                   "SUM(status = 'metin_yok') AS notext FROM documents")
     return render(request, "settings.html", user, usage=storage.usage(), queue=pipeline.queue_state(), soffice=storage.soffice(),
-                  test=test, probe=probe, demo=seed.demo_present(), preview=preview, env_file=config.ENV_FILE,
+                  test=test, probe=probe, preview=preview, env_file=config.ENV_FILE,
                   provider_set=config.AI_PROVIDER_SET,
                   failed_jobs=db.rows("SELECT * FROM jobs WHERE status = 'hata' ORDER BY id DESC LIMIT 10"),
                   mock_docs=db.scalar("SELECT COUNT(*) FROM documents WHERE ai_mode = 'mock' OR (ai_mode IS NULL AND status = 'islendi')"),
-                  ai_cfg=ai_cfg, deps=deps, docs=docs)
-
-
-@router.post("/ayarlar/demo-temizle")
-def demo_clear(request: Request, user=Depends(require_editor)):
-    stats = seed.clear_demo(user["id"])
-    flash(request, f"Demo verisi silindi: {stats['proje']} proje, {stats['doküman']} doküman, {stats['girişim']} girişim ve demo metrikleri. "
-                   "Demo verisi bir daha yüklenmeyecek.")
-    return redirect("/ayarlar")
+                  ai_cfg=ai_cfg, deps=deps, docs=docs, orphan_brands=orphan_brands)
 
 
 @router.post("/ayarlar/sifirla")
@@ -267,7 +282,7 @@ def reset_everything(request: Request, confirm: str = Form(""), user=Depends(req
         flash(request, "Onay için kutuya SİL yazın.", "error")
         return redirect("/ayarlar#tehlike")
     seed.reset_all(user["id"])
-    flash(request, "Tüm proje, doküman, metrik ve AI verileri silindi. Kullanıcılar ve departmanlar korundu.")
+    flash(request, "Tüm proje, doküman, metrik ve AI verileri silindi. Kullanıcılar, departmanlar ve markalar korundu.")
     return redirect("/ayarlar")
 
 
@@ -300,6 +315,35 @@ def department_delete(request: Request, dep_id: int, user=Depends(require_editor
 def ai_deep_test(request: Request, user=Depends(require_editor)):
     from .. import ai_probe
     return settings(request, user, probe=ai_probe.run())
+
+
+@router.post("/ayarlar/marka")
+def brand_save(request: Request, name: str = Form(...), brand_id: str = Form(""), department_id: str = Form(""),
+               active: str = Form("1"), user=Depends(require_editor)):
+    data = {"name": name.strip()[:80], "department_id": int(department_id) if department_id.isdigit() else None,
+            "active": 0 if active == "0" else 1}
+    try:
+        if brand_id.isdigit():
+            db.update("brands", int(brand_id), data)
+            for r in db.rows("SELECT project_id FROM project_brands WHERE brand_id = ?", (int(brand_id),)):
+                org.set_project_brands(r["project_id"], org.project_brand_ids(r["project_id"]), infer_department=False)
+        else:
+            db.insert("brands", {**data, "sort": 99})
+    except Exception:
+        flash(request, "Bu adla bir marka zaten var.", "error")
+        return redirect("/ayarlar#departmanlar")
+    flash(request, "Marka kaydedildi.")
+    return redirect("/ayarlar#departmanlar")
+
+
+@router.post("/ayarlar/marka/{bid}/sil")
+def brand_delete(request: Request, bid: int, user=Depends(require_editor)):
+    pids = [r["project_id"] for r in db.rows("SELECT project_id FROM project_brands WHERE brand_id = ?", (bid,))]
+    db.execute("DELETE FROM brands WHERE id = ?", (bid,))
+    for pid in pids:
+        org.set_project_brands(pid, org.project_brand_ids(pid), infer_department=False)
+    flash(request, "Marka silindi." + (f" {len(pids)} projeden kaldırıldı." if pids else ""))
+    return redirect("/ayarlar#departmanlar")
 
 
 @router.post("/ayarlar/ai-test", response_class=HTMLResponse)

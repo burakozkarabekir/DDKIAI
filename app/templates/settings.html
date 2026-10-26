@@ -33,8 +33,8 @@
         <table><thead><tr><th>Birim</th><th class="num">Kart</th><th>Eşleme</th></tr></thead><tbody>
         {% for u in preview.units %}<tr><td>{{ u.name }}</td><td class="num">{{ u.count }}</td><td><select name="unit_{{ u.name }}">
           <option value="">— Boş bırak —</option>
-          <option value="marka" {{ 'selected' if u.kind == 'brand' }}>Marka olarak yaz</option>
-          <option value="yeni" {{ 'selected' if u.kind == 'new' }}>Yeni departman: {{ u.name }}</option>
+          <option value="marka" {{ 'selected' if u.kind == 'brand' }}>Marka{{ ': ' ~ u.dept if u.kind == 'brand' and u.dept }} (departmanı markadan)</option>
+          <option value="yeni">Yeni departman oluştur: {{ u.name }}</option>
           {% for d in deps %}<option value="{{ d.id }}" {{ 'selected' if u.kind == 'dept' and u.dept == d.name }}>{{ d.name }}</option>{% endfor %}
         </select></td></tr>{% else %}<tr><td colspan="3" class="muted small">Kart adlarında birim bulunamadı.</td></tr>{% endfor %}
         </tbody></table>
@@ -51,40 +51,56 @@
 
 <div class="grid g-main">
   <div class="card" id="departmanlar">
-    <div class="card-head"><h2>Departmanlar</h2><span class="muted small">Projeler departmanlara atanır; kapsama haritası ve boşluk analizi bu listeye göre yapılır.</span></div>
-    <table>
-      <thead><tr><th>Sıra</th><th>Departman</th><th>Açıklama / ağrı noktaları</th><th class="num">Proje</th><th></th></tr></thead>
-      <tbody>{% for d in deps %}
-      <tr style="{{ 'opacity:.5' if not d.active }}">
-        <td class="small">{{ d.sort }}</td>
-        <td><b>{{ d.name }}</b>{% if not d.active %} <span class="badge">pasif</span>{% endif %}</td>
-        <td class="small">{{ d.description or '' }}{% if d.pain_points %}<div class="muted">Ağrı noktaları: {{ d.pain_points }}</div>{% endif %}</td>
-        <td class="num">{{ d.n }}</td>
-        <td class="nowrap">
-          <details class="inline"><summary class="btn sm">Düzenle</summary>
-            <form method="post" action="/ayarlar/departman" style="margin-top:8px;min-width:280px">
-              <input type="hidden" name="dep_id" value="{{ d.id }}">
-              <div class="field"><label>Ad</label><input name="name" value="{{ d.name }}" required></div>
-              <div class="field"><label>Açıklama</label><input name="description" value="{{ d.description or '' }}"></div>
-              <div class="field"><label>Ağrı noktaları / fırsatlar</label><textarea name="pain_points" rows="2">{{ d.pain_points or '' }}</textarea></div>
-              <div class="row"><div style="width:90px"><label>Sıra</label><input name="sort" value="{{ d.sort }}"></div>
-                <label class="row" style="margin-top:20px"><input type="checkbox" name="active" value="1" {{ 'checked' if d.active }}> Aktif</label></div>
-              <div class="row" style="margin-top:8px"><button class="btn primary sm">Kaydet</button></div>
-            </form>
-            <form method="post" action="/ayarlar/departman/{{ d.id }}/sil" data-confirm="{{ d.name }} silinsin mi?{{ ' ' ~ d.n ~ ' projenin departmanı boşalacak.' if d.n }}" style="margin-top:6px"><button class="btn ghost sm danger">Sil</button></form>
+    <div class="card-head"><h2>Departmanlar ve markalar</h2><span class="muted small">Kapsama haritası, filtreler ve AI boşluk analizi bu yapıya göre çalışır.</span></div>
+    <div class="dept-list">
+    {% for d in deps %}
+      <div class="dept-row {{ 'off' if not d.active }}">
+        <div class="dept-main">
+          <span class="dept-no">{{ loop.index }}</span>
+          <div style="flex:1;min-width:0"><b>{{ d.name }}</b>{% if not d.active %} <span class="badge">pasif</span>{% endif %}
+            <div class="small muted">{{ d.n }} proje{% if d.description %} · {{ d.description }}{% endif %}</div>
+            {% if d.pain_points %}<div class="small muted">Ağrı noktaları: {{ d.pain_points }}</div>{% endif %}
+            <div class="brand-chips">{% for b in d.brands %}
+              <details class="inline edit"><summary class="bchip {{ 'off' if not b.active }}">{{ b.name }} <span class="muted">{{ b.n }}</span></summary>
+                <div class="popover"><form method="post" action="/ayarlar/marka">
+                  <input type="hidden" name="brand_id" value="{{ b.id }}">
+                  <div class="field"><label>Marka adı</label><input name="name" value="{{ b.name }}" required></div>
+                  <div class="field"><label>Departman</label><select name="department_id">{% for o in deps %}<option value="{{ o.id }}" {{ 'selected' if o.id == b.department_id }}>{{ o.name }}</option>{% endfor %}</select></div>
+                  <div class="field"><label>Durum</label><select name="active"><option value="1" {{ 'selected' if b.active }}>Aktif</option><option value="0" {{ 'selected' if not b.active }}>Pasif</option></select></div>
+                  <button class="btn primary sm">Kaydet</button></form>
+                  <form method="post" action="/ayarlar/marka/{{ b.id }}/sil" data-confirm="{{ b.name }} silinsin mi? {{ b.n }} projeden kaldırılır." style="margin-top:6px"><button class="btn ghost sm danger">Markayı sil</button></form></div>
+              </details>{% endfor %}
+              <details class="inline edit"><summary class="bchip add">+ marka</summary>
+                <div class="popover"><form method="post" action="/ayarlar/marka"><input type="hidden" name="department_id" value="{{ d.id }}">
+                  <div class="field"><label>Yeni marka ({{ d.name }})</label><input name="name" required></div><button class="btn primary sm">Ekle</button></form></div></details>
+            </div>
+          </div>
+          <details class="inline edit"><summary class="btn ghost sm">Düzenle</summary>
+            <div class="popover">
+              <form method="post" action="/ayarlar/departman">
+                <input type="hidden" name="dep_id" value="{{ d.id }}">
+                <div class="field"><label>Ad</label><input name="name" value="{{ d.name }}" required></div>
+                <div class="field"><label>Açıklama</label><input name="description" value="{{ d.description or '' }}"></div>
+                <div class="field"><label>Ağrı noktaları / fırsatlar</label><textarea name="pain_points" rows="2">{{ d.pain_points or '' }}</textarea></div>
+                <div class="row"><div style="width:90px"><label>Sıra</label><input name="sort" value="{{ d.sort }}"></div>
+                  <label class="row" style="margin-top:20px"><input type="checkbox" name="active" value="1" {{ 'checked' if d.active }}> Aktif</label></div>
+                <button class="btn primary sm" style="margin-top:8px">Kaydet</button>
+              </form>
+              <form method="post" action="/ayarlar/departman/{{ d.id }}/sil" data-confirm="{{ d.name }} silinsin mi?{{ ' ' ~ d.n ~ ' projenin departmanı boşalacak.' if d.n }}" style="margin-top:6px"><button class="btn ghost sm danger">Departmanı sil</button></form>
+            </div>
           </details>
-        </td>
-      </tr>{% endfor %}</tbody>
-    </table>
-    <hr>
-    <h3>Departman ekle</h3>
-    <form method="post" action="/ayarlar/departman" class="form-grid">
-      <div class="field"><label>Ad</label><input name="name" required></div>
-      <div class="field span2"><label>Açıklama</label><input name="description"></div>
-      <div class="field span2"><label>Ağrı noktaları / fırsatlar</label><input name="pain_points"></div>
-      <div class="field"><label>Sıra</label><input name="sort" value="{{ deps|length }}"></div>
-      <div class="field"><button class="btn primary">Ekle</button></div>
-    </form>
+        </div>
+      </div>
+    {% endfor %}
+    {% if orphan_brands %}<div class="dept-row"><div class="small"><b>Departmansız markalar:</b> {% for b in orphan_brands %}<span class="bchip">{{ b.name }}</span>{% endfor %}</div></div>{% endif %}
+    </div>
+    <details class="inline" style="margin-top:12px"><summary class="btn sm">+ Departman ekle</summary>
+      <form method="post" action="/ayarlar/departman" class="form-grid" style="margin-top:10px">
+        <div class="field span2"><label>Ad</label><input name="name" required></div>
+        <div class="field"><label>Sıra</label><input name="sort" value="{{ deps|length }}"></div>
+        <div class="field span3"><label>Açıklama</label><input name="description"></div>
+        <div class="field"><button class="btn primary">Ekle</button></div>
+      </form></details>
   </div>
 
   <div class="stack">
@@ -138,14 +154,6 @@
         liste geçmişi, yorumlar ve checklist'ler taşınır. Aynı dosyayı tekrar yüklemek mevcut projeleri günceller, tekrar oluşturmaz.</p>
       <form method="post" action="/ayarlar/trello/onizle" enctype="multipart/form-data" class="row"><input type="file" name="file" accept=".json" required style="flex:1"><button class="btn primary sm">Önizle</button></form>
     </div>
-    {% if demo %}
-    <div class="card" id="demo">
-      <h2>Demo verisi</h2>
-      <p class="small">Uygulamada örnek (demo) projeler, dokümanlar, girişimler ve AI Security metrikleri var. Silmek yalnızca demo kayıtlarını kaldırır;
-        sizin eklediğiniz proje ve dokümanlar korunur. Silindikten sonra demo bir daha yüklenmez.</p>
-      <form method="post" action="/ayarlar/demo-temizle" data-confirm="Demo projeler, dokümanlar, girişimler, metrikler ve yorumlar silinecek. Devam?"><button class="btn primary sm">Demo verisini temizle</button></form>
-    </div>
-    {% endif %}
     <div class="card" id="kuyruk">
       <h2>İşleme kuyruğu</h2>
       <p class="small">Bekleyen: <b>{{ queue.waiting }}</b> · çalışan: <b>{{ queue.running }}</b> · hatalı: <b>{{ queue.failed }}</b></p>

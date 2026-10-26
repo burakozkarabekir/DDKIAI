@@ -1,33 +1,90 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import health, stage, risk %}
-{% block title %}Yönetici Özeti{% endblock %}
+{% from "partials/macros.html" import health, stage, risk, icon %}
+{% block title %}Genel Bakış{% endblock %}
 {% block crumbs %}{{ today()|date }}{% if nav.pending %} · <a href="/inceleme">{{ nav.pending }} öneri onay bekliyor</a>{% endif %}{% endblock %}
 {% block topactions %}
 <a class="btn" href="/disa-aktar/projeler.csv">Excel'e aktar</a>
-<a class="btn" href="/dokumanlar">Doküman yükle</a>
-<a class="btn primary" href="/danisman">AI Danışmana sor</a>
+<a class="btn" href="/durum-girisi">Durum girişi</a>
+<a class="btn primary" href="/dokumanlar">Doküman yükle</a>
 {% endblock %}
+{% macro counter(v, prefix='', suffix='') -%}
+<span data-count="{{ v }}" data-prefix="{{ prefix }}" data-suffix="{{ suffix }}">{{ prefix }}{{ v|num }}{{ suffix }}</span>
+{%- endmacro %}
+{% macro money_counter(v) -%}
+{% if (v or 0) >= 1000000 %}{{ counter(((v / 1000000)|round(1)), '', ' M TL') }}{% else %}{{ counter((v or 0)|int, '', ' TL') }}{% endif %}
+{%- endmacro %}
 {% block content %}
-<div class="page-head">
-  <div><h1>AI Impact · Yönetici Özeti</h1>
-  <p>Portföyün nerede olduğu, nerede takıldığı ve gerçekten ne kadar değer ürettiği.</p></div>
-</div>
-
 {% set risky_n = health_counts['sari'] + health_counts['kirmizi'] %}
 {% set measured_pct = (measured|length / live|length * 100) if live else 0 %}
 {% set realized_pct = (value.realized / value.live_estimated * 100) if value.live_estimated else 0 %}
-<div class="grid g4">
-  <div class="card stat"><div class="label">Aktif proje</div><div class="value">{{ active|length }}</div>
-    <div class="sub">Toplam {{ projects|length }} kayıt · {{ stage_counts[0][2] }} fikir havuzunda</div></div>
-  <div class="card stat"><div class="label">Canlıda / ölçekleniyor</div><div class="value">{{ live|length }}</div>
-    <div class="sub">{{ measured|length }} tanesinde etki ölçülüyor (%{{ measured_pct|round|int }})</div>
-    <div class="meter"><span style="width:{{ measured_pct }}%"></span></div></div>
-  <div class="card stat"><div class="label">Gerçekleşen yıllık etki</div><div class="value">{{ value.realized|money }}</div>
-    <div class="sub">Canlı projelerin hedefi {{ value.live_estimated|money }} · %{{ realized_pct|round|int }} gerçekleşme</div>
-    <div class="meter"><span style="width:{{ [realized_pct, 100]|min }}%"></span></div></div>
-  <div class="card stat"><div class="label">Dikkat gerektiren</div><div class="value">{{ risky_n }}</div>
-    <div class="sub"><span class="health kirmizi">{{ health_counts['kirmizi'] }} riskli</span> &nbsp; <span class="health sari">{{ health_counts['sari'] }} dikkat</span></div></div>
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="hero-top">
+    <div>
+      <div class="eyebrow">{{ ORG_NAME }} · AI Impact</div>
+      <h1>Yapay zekâ portföyü <span class="grad">tek ekranda</span></h1>
+      <p>{% if projects %}{{ active|length }} aktif proje, {{ matrix|selectattr('total')|list|length }} departman, {{ brand_counts|length }} marka. Nerede olduğumuz, nerede takıldığımız ve ne kadar değer ürettiğimiz.{% else %}Henüz proje yok. Trello'dan içe aktarın, proje ekleyin ya da DT raporlarını yükleyin — ekran kendiliğinden dolacak.{% endif %}</p>
+    </div>
+    <div class="hero-side">
+      <div class="ring" style="--p:{{ measured_pct|round|int }}" data-tip="Canlı projelerde etki ölçümü">
+        <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" cx="60" cy="60" r="52" pathLength="100"/></svg>
+        <div><b>{{ counter(measured_pct|round|int, '%') }}</b><span>ölçülüyor</span></div>
+      </div>
+    </div>
+  </div>
+  {% if projects %}
+  <div class="hero-kpis">
+    <a class="hk" href="/projeler"><span>Aktif proje</span><b>{{ counter(active|length) }}</b><em>{{ projects|length }} kayıt · {{ stage_counts[0][2] }} fikir</em></a>
+    <a class="hk" href="/projeler?view=liste&stage=canli"><span>Canlıda / ölçekleniyor</span><b>{{ counter(live|length) }}</b><em>{{ measured|length }} tanesi ölçülüyor</em></a>
+    <a class="hk" href="/projeler?view=liste"><span>Gerçekleşen yıllık etki</span><b>{{ money_counter(value.realized) }}</b><em>hedefin %{{ realized_pct|round|int }}'i</em></a>
+    <a class="hk {{ 'alert' if health_counts['kirmizi'] }}" href="#riskler"><span>Dikkat gerektiren</span><b>{{ counter(risky_n) }}</b><em>{{ health_counts['kirmizi'] }} riskli · {{ health_counts['sari'] }} dikkat</em></a>
+    <a class="hk" href="/guvenlik/copilot"><span>Copilot benimseme</span><b>{% if copilot %}{{ counter(copilot.adoption, '%') }}{% else %}—{% endif %}</b><em>{% if copilot %}{{ copilot.active }}/{{ copilot.total }} aktif kullanıcı{% else %}Excel yükleyin{% endif %}</em></a>
+  </div>
+  <div class="flow">
+    {% set maxs = (stage_counts|map(attribute=2)|max) or 1 %}
+    {% for key, label, n in stage_counts %}
+    <a class="flow-step" href="/projeler?view=liste&stage={{ key }}" style="--h:{{ (n / maxs * 100)|round|int }}%" data-tip="{{ label }}: {{ n }} proje">
+      <span class="flow-bar"><i></i></span><b>{{ n }}</b><span>{{ label }}</span></a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="hero-steps">
+    <a href="/ayarlar#trello"><b>1</b><span>Trello panosunu içe aktarın</span><em>JSON dışa aktarımı → projeler, aşamalar, yorumlar</em></a>
+    <a href="/projeler/yeni"><b>2</b><span>Ya da proje ekleyin</span><em>Departman, marka, aşama, KPI</em></a>
+    <a href="/dokumanlar"><b>3</b><span>DT raporlarını yükleyin</span><em>Word / PDF / PowerPoint → AI analizi</em></a>
+    <a href="/guvenlik/copilot"><b>4</b><span>Copilot Excel'ini ekleyin</span><em>Benimseme ve lisans analizi</em></a>
+  </div>
+  {% endif %}
+</section>
+
+{% if projects %}
+<div class="grid g-main" style="margin-top:18px">
+  <div class="card">
+    <div class="card-head"><h2>Departman × aşama</h2><span class="small muted">iptaller hariç · hücre = proje sayısı</span></div>
+    <div class="table-wrap" style="border:0"><table class="matrix">
+      <thead><tr><th>Departman</th>{% for k, label, _ in matrix_stages %}<th class="mx-h" title="{{ label }}">{{ label.split(' ')[0] }}</th>{% endfor %}<th class="num">Toplam</th></tr></thead>
+      <tbody>{% for m in matrix %}<tr class="{{ 'empty-row' if not m.total }}">
+        <td><a href="/projeler?view=liste&departman={{ m.id }}">{{ m.name }}</a>{% if m.risky %} <span class="health kirmizi small" title="Riskli proje">{{ m.risky }}</span>{% endif %}</td>
+        {% for c in m.cells %}<td class="mx"><span class="mxc {{ 'z' if not c else 'hi' if c / matrix_max > 0.5 }}" style="--a:{{ ((c / matrix_max) if c else 0)|round(2) }}" data-tip="{{ m.name }} · {{ matrix_stages[loop.index0][1] }}: {{ c }}">{{ c or '' }}</span></td>{% endfor %}
+        <td class="num"><b>{{ m.total or '—' }}</b></td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="small muted" style="margin:8px 0 0">Boş satırlar AI fırsatı olabilecek alanlardır · <a href="/danisman">Boşluk analizi →</a></p>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Marka kırılımı</h2><a class="small" href="/projeler?view=liste">Projeler →</a></div>
+    {% if brand_counts %}{% set maxb = brand_counts[0].n or 1 %}
+    <div class="hbars">{% for b in brand_counts %}
+      <a class="hbar" href="/projeler?view=liste&marka={{ b.id }}" data-tip="{{ b.name }} ({{ b.dept }}): {{ b.n }} proje"><span class="hb-label">{{ b.name }}</span>
+        <span class="hb-track"><span class="hb-fill" style="width:{{ b.n / maxb * 100 }}%"></span></span><span class="hb-val">{{ b.n }}</span></a>{% endfor %}</div>
+    {% else %}<div class="empty small">Projelere marka atanmamış. Proje düzenleme ekranından marka seçebilirsiniz.</div>{% endif %}
+    <hr>
+    <div class="grid g2" style="gap:10px">
+      <div class="mini"><span class="label">Son 7 gün durum güncellemesi</span><b>{{ recent_updates }}</b><a class="sub" href="/durum-girisi">Durum girişi →</a></div>
+      <div class="mini"><span class="label">Yönetici raporu</span><b>{{ doc_counts.get('yonetici_ozeti', 0) }}</b><a class="sub" href="/alan/yonetici-raporlari">Raporlar →</a></div>
+    </div>
+  </div>
 </div>
+{% endif %}
 
 <div class="card" style="margin-top:16px">
   <div class="card-head"><h2>Zaman çizelgesi</h2><a class="small" href="/zaman-cizelgesi">Gantt görünümü →</a></div>
@@ -76,7 +133,7 @@
 
 <div class="grid g-main" style="margin-top:16px">
   <div class="card">
-    <div class="card-head"><h2>Takılan ya da takılabilecek projeler</h2><span class="muted small">AI risk skoru = dokümanlar + geçmiş trend</span></div>
+    <div class="card-head" id="riskler"><h2>Takılan ya da takılabilecek projeler</h2><span class="muted small">AI risk skoru = dokümanlar + geçmiş trend</span></div>
     {% if risky %}
     <ul class="list-plain">
       {% for p in risky %}
@@ -118,18 +175,7 @@
   </div>
 </div>
 
-<div class="grid g-main" style="margin-top:16px">
-  <div class="card">
-    <div class="card-head"><h2>Departman kapsaması</h2><a class="small" href="/danisman">Boşluk analizi →</a></div>
-    <div class="coverage">
-      {% for c in coverage %}
-      <a class="cov {{ c.level|replace('ş','s')|replace('ı','i') }}" href="/projeler?view=liste&departman={{ c.id }}"><b>{{ c.area }}</b>
-        {% if c.projects %}{{ c.projects|length }} proje · {{ c.live }} canlı{% else %}<span class="muted">Proje yok</span>{% endif %}</a>
-      {% endfor %}
-    </div>
-    <div class="legend"><span><i style="background:var(--good)"></i>Canlı proje var</span><span><i style="background:var(--warning)"></i>Sadece geliştirme/plan</span><span><i style="background:var(--critical)"></i>Boş alan</span><a class="small" href="/ayarlar#departmanlar">Departmanları düzenle</a></div>
-  </div>
-  <div class="stack">
+<div class="grid g3" style="margin-top:16px">
     <div class="card">
       <div class="card-head"><h3>Kaynaklar arası çelişkiler</h3><span class="badge">{{ conflicts|length }}</span></div>
       <ul class="list-plain">{% for c in conflicts[:5] %}
@@ -150,6 +196,5 @@
           <div class="small"><a href="{{ c.link }}">{{ c.target_name }}</a>: {{ c.body|striptags|truncate(110) }}</div></li>
       {% else %}<li class="muted small">Yorum yok.</li>{% endfor %}</ul>
     </div>
-  </div>
 </div>
 {% endblock %}

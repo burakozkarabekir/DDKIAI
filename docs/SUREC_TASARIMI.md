@@ -45,7 +45,7 @@ Akış dışı: **Beklemede** (en fazla 6 hafta, sonra komite kararı) ve **İpt
 ### Ölçümleme olgunluğu
 `Tanımlanmadı → KPI tanımlı → Baseline alındı → Ölçülüyor → Doğrulandı`
 İlk dört seviye KPI verisi girildikçe sistem tarafından otomatik ilerletilir. **Doğrulandı** bir insan kararıdır
-(çeyreklik etki doğrulamasında Finans ile birlikte).
+(çeyreklik etki doğrulamasında Mali İşler ile birlikte).
 
 ### Sağlık tanımları
 - **Yolunda:** Takvim ve kapsam planda; engel yok ya da sahibi belli ve bu hafta çözülecek.
@@ -66,7 +66,7 @@ Akış dışı: **Beklemede** (en fazla 6 hafta, sonra komite kararı) ve **İpt
 | Cuma | Aksiyon sahipleri kapanışları işler | Herkes |
 
 **Aylık:** AI Yönlendirme Komitesi (aşama kararları, yeni talepler) · KPI gerçekleşen değer girişi · AI Security metrikleri.
-**Çeyreklik:** Etki doğrulama (Finans) · AI boşluk analizi ve odak alanı seçimi.
+**Çeyreklik:** Etki doğrulama (Mali İşler) · AI boşluk analizi ve odak alanı seçimi.
 
 ---
 

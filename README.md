@@ -10,15 +10,26 @@ Trello panosunun yerini alır; dokümanlardan otomatik bilgi çıkarır, kaynakl
 
 | Modül | Ne işe yarar |
 |---|---|
-| **Yönetici Özeti** | KPI'lar, zaman çizelgesi özeti, portföy hunisi, riskli projeler, haftalık AI yorumu, ölçülmeyen canlı projeler, güncel olmayanlar, aksiyonlar, departman kapsaması, kaynak çelişkileri |
-| **Projeler** | Pano + liste. Proje: künye, aşama kapıları, **Bilgi & Kaynaklar** (AI sentezi, bilgi akışı, öneriler, çelişkiler), KPI, dokümanlar, aksiyonlar, yorumlar, tarihçe |
+| **Genel Bakış** | Vitrin ekranı: canlı sayaçlar, ölçüm halkası, aşama akışı, departman × aşama matrisi, marka kırılımı, Copilot benimseme, riskli projeler, haftalık AI yorumu, aksiyonlar, çelişkiler |
+| **Projeler** | Pano + liste, departman ve **marka** filtresi. Proje ekleme/düzenleme (kod, departman, çoklu marka). Proje: künye, aşama kapıları, **Bilgi & Kaynaklar** (AI sentezi, bilgi akışı, öneriler, çelişkiler), KPI, dokümanlar, aksiyonlar, yorumlar, tarihçe |
+| **Durum Girişi** | Dokümanlardan bağımsız, elle durum güncelleme: proje sayfasında **● Durum güncelle** ya da tüm aktif projeler için tek ekranlık haftalık tablo. Güncellemeler bilgi akışına ve AI analizlerine girer |
+| **Yönetici Raporları** | Yönetici özeti / sunum dokümanları için ayrı alan ve alan bazında AI analizi |
 | **Zaman Çizelgesi** | Gantt (başlangıç → canlı, planlanan, gecikme), çeyrek bazında başlayan/tamamlanan, kümülatif tamamlanan, departman/aşama/yıl filtresi |
 | **Dokümanlar** | Çoklu yükleme, otomatik tür tespiti, proje eşleştirme, içerikte arama, doküman detayında çıkarılan bilgiler |
 | **DT Raporları** | DT durum raporları, rapor × proje sağlık ısı haritası, iç notlar, haftalık AI yorumları |
 | **İnceleme Kuyruğu** | Proje alanını değiştirecek önerilerin onayı (kaynak + alıntıyla) |
-| **AI Danışman** | Kaynak göstererek soru-cevap, boşluk analizi, haftalık yorum, içgörü arşivi |
-| **AI Security** | AI Studio, Shadow AI, DLP, eğitim girişimleri ve aylık metrikler |
-| **Ayarlar** | Departmanlar, AI bağlantı testi, depolama durumu, işleme kuyruğu |
+| **AI Danışman** | Kaynak göstererek soru-cevap, boşluk analizi, haftalık yorum, içgörü arşivi. Her sayfanın sağ alt köşesindeki **AI'a sor** balonu açık sayfanın bağlamıyla (proje, Copilot, doküman alanı) yanıt verir |
+| **AI Security** | Üç ayrı sayfa: **Genel & Girişimler** (AI Studio, Shadow AI, DLP metrikleri), **Copilot Kullanımı** (M365 Copilot Excel/CSV: benimseme, departman/uygulama kırılımı, kullanılmayan lisanslar, dönemsel eğilim, AI analizi — kişisel veri AI'a gönderilmez), **AI Yönetişimi** (politika/standart dokümanları ve AI analizi) |
+| **Ayarlar** | 10 departman ve bağlı markalar, AI bağlantı testi ve derin tanılama, Trello aktarımı, depolama durumu, işleme kuyruğu |
+
+### Departman ve marka kırılımı
+
+Departmanlar ve markalar iki ayrı kırılımdır. 10 departman:
+1 VW Binek · 2 VW Ticari Araç - Scania - Thermo King - Meiller - Wielton · 3 Seat - Cupra - Porsche - DOD ·
+4 Audi - Bentley - Lamborghini · 5 Yedek Parça ve Lojistik · 6 Mali İşler · 7 Dijital Dönüşüm ve Kurumsal İletişim · 8 Hukuk ·
+9 İnsan Kaynakları ve Süreç Yönetimi · 10 İç Denetim.
+Departman adındaki her marka (Scania, Cupra, Bentley…) ayrı bir marka kaydıdır; bir proje birden çok markaya ait olabilir.
+Departmanı boş bırakılan projenin departmanı seçilen markadan gelir. Liste **Ayarlar → Departmanlar ve markalar** bölümünden düzenlenir.
 
 ## Hızlı başlangıç (yerel)
 
@@ -28,12 +39,13 @@ cp .env.example .env
 uvicorn app.main:app --reload       # http://localhost:8000
 ```
 
-Giriş ekranı kapalıdır (`AUTH_ENABLED=0`); uygulama doğrudan açılır. Demo verisi gerçek Word/Excel dokümanlarıyla gelir.
+Giriş ekranı kapalıdır (`AUTH_ENABLED=0`); uygulama doğrudan açılır. Uygulamada örnek (demo) veri yoktur: ekranlar yalnızca
+yüklediğiniz dokümanlar, Trello aktarımı ve elle girdiğiniz verilerle dolar.
 
 ## DMZ sunucusuna kurulum (Docker)
 
 ```bash
-cp .env.example .env                # aşağıdaki "AI bağlantısı" adımlarını uygulayın, SECRET_KEY verin, SEED_DEMO=0
+cp .env.example .env                # aşağıdaki "AI bağlantısı" adımlarını uygulayın, SECRET_KEY verin
 docker compose up -d --build
 ```
 
@@ -105,15 +117,19 @@ Sunucunun çıkışında kurumsal proxy varsa `HTTPS_PROXY` / `NO_PROXY` ortam d
 - Desteklenen türler: docx, doc*, pdf, pptx, ppt*, xlsx, xls*, csv, txt, md, eml, html, rtf*, odt*. (*LibreOffice ile dönüştürülür; Docker imajında hazır gelir.)
   Taranmış (görüntü) PDF'lerde metin çıkmaz; doküman "metin yok" olarak işaretlenir.
 
-## İlk kurulum: demo verisini kaldırıp Trello'yu aktarmak
+## İlk kurulum: Trello'yu aktarmak
 
-1. **Ayarlar → Demo verisi → Demo verisini temizle.** Yalnızca örnek kayıtlar silinir, demo bir daha yüklenmez.
-2. **Ayarlar → Trello'dan aktar.** Trello'da *Menü → Yazdır, dışa aktar ve paylaş → JSON olarak dışa aktar* ile indirdiğiniz dosyayı seçin, **Önizle**.
-3. Önizlemede listelerin aşamalarını (ör. *AI Champion* → Aktarma) ve kart adındaki birimlerin departmanlarını (ör. *YP Lojistik* → Yedek Parça & Lojistik,
+Eski sürümlerden kalan demo kayıtları ilk açılışta kendiliğinden silinir (sizin eklediğiniz proje, doküman ve yorumlar korunur);
+eski departmanlar yeni 10 departmana taşınır.
+
+1. **Ayarlar → Trello'dan aktar.** Trello'da *Menü → Yazdır, dışa aktar ve paylaş → JSON olarak dışa aktar* ile indirdiğiniz dosyayı seçin, **Önizle**.
+2. Önizlemede listelerin aşamalarını (ör. *AI Champion* → Aktarma) ve kart adındaki birimlerin departmanlarını (ör. *YP Lojistik* → Yedek Parça ve Lojistik,
    *VW Binek* → marka) kontrol edin, **Aktar**. UC kodları proje kodu olur; liste geçmişi tarihçeye, yorumlar ve checklist'ler projelere taşınır.
    Aynı dosyayı sonra tekrar yüklerseniz projeler güncellenir, kopya oluşmaz.
-4. Dokümanları yükleyin. Dokümanda UC kodu ya da proje adı geçtiğinde otomatik eşleşir; geçmiyorsa proje sayfasında **Diğer adlar** alanına
+3. Dokümanları yükleyin. Dokümanda UC kodu ya da proje adı geçtiğinde otomatik eşleşir; geçmiyorsa proje sayfasında **Diğer adlar** alanına
    dokümanlarda kullanılan adı ekleyip dokümanı yeniden işleyin.
+4. Copilot kullanım Excel'ini **AI Security → Copilot Kullanımı** sayfasından yükleyin. Sütunlar otomatik tanınır; tanınmayanları
+   aynı sayfadaki sütun eşlemesinden düzeltebilirsiniz. M365 yönetim merkezindeki kişi bazlı rapor da, departman bazlı özet tablo da olur.
 
 Her şeyi silip baştan başlamak için: **Ayarlar → Tüm verileri sıfırla** (kullanıcılar ve departmanlar korunur).
 
@@ -143,4 +159,5 @@ pip install pytest && python -m pytest -q
 | `app/ai.py` | AI sağlayıcıları, istemler (çıkarım, sentez, haftalık yorum, boşluk analizi, danışman), demo modu |
 | `app/extract.py` · `app/storage.py` | Metin çıkarma (yapı korunarak) · dosya deposu |
 | `app/timeline.py` | Gantt ve çeyreklik istatistikler |
-| `app/domain.py` | Aşamalar, kapı kriterleri, doküman ve bilgi türleri, departman varsayılanları |
+| `app/domain.py` | Aşamalar, kapı kriterleri, doküman ve bilgi türleri, doküman alanları, departman ve marka listesi |
+| `app/org.py` · `app/status.py` · `app/copilot.py` | Departman/marka yapısı · manuel durum güncellemeleri · Copilot kullanım analitiği |

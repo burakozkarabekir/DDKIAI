@@ -37,7 +37,6 @@ _load_dotenv()
 APP_NAME = os.getenv("APP_NAME", "AI Impact Merkezi")
 ORG_NAME = os.getenv("ORG_NAME", "Doğuş Otomotiv · Dijital Dönüşüm")
 SECRET_KEY = os.getenv("SECRET_KEY", "degistir-beni-uretimde")
-SEED_DEMO = os.getenv("SEED_DEMO", "1") == "1"  # demo verisi "Ayarlar > Demo verisini temizle" ile kalıcı kaldırılır
 SESSION_HOURS = int(os.getenv("SESSION_HOURS", "12"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
 

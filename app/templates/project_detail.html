@@ -4,6 +4,7 @@
 {% block crumbs %}<a href="/projeler">Projeler</a> / {{ p.code }}{% endblock %}
 {% block topactions %}
 {% if user.role != 'dt' %}<form method="post" action="/projeler/{{ p.id }}/sentez"><button class="btn" data-busy="Kuyruğa alınıyor…">✦ Tüm kaynaklardan sentez üret</button></form>{% endif %}
+{% if user.role in D.CAN_UPLOAD %}<a class="btn" href="?tab=genel#durum">● Durum güncelle</a>{% endif %}
 {% if user.role in D.CAN_EDIT %}<a class="btn primary" href="/projeler/{{ p.id }}/duzenle">Düzenle</a>{% endif %}
 {% endblock %}
 {% block content %}
@@ -46,7 +47,7 @@
       <h3>Künye</h3>
       <table>
         <tr><td class="muted">Departman</td><td>{{ p.dept or '—' }}</td><td class="muted">İş birimi</td><td>{{ p.business_unit or '—' }}</td></tr>
-        <tr><td class="muted">Markalar</td><td>{{ p.brands or '—' }}</td><td class="muted">AI tipi</td><td>{{ p.ai_type or '—' }}</td></tr>
+        <tr><td class="muted">Markalar</td><td>{{ p.brand_list|join(', ') or '—' }}</td><td class="muted">AI tipi</td><td>{{ p.ai_type or '—' }}</td></tr>
         <tr><td class="muted">Sponsor</td><td>{{ p.sponsor or '—' }}</td><td class="muted">DO sorumlusu</td><td>{{ p.owner or '—' }}</td></tr>
         <tr><td class="muted">DT sorumlusu</td><td>{{ p.dt_lead or '—' }}</td><td class="muted">Başlangıç</td><td>{{ p.start_date|date }}</td></tr>
         <tr><td class="muted">Hedef canlı</td><td>{% if p.target_date|overdue and p.stage not in ('canli','olcekleme') %}<span class="health kirmizi">{{ p.target_date|date }} · gecikti</span>{% else %}{{ p.target_date|date }}{% endif %}</td><td class="muted">Canlıya geçiş</td><td>{{ p.golive_date|date }}</td></tr>
@@ -77,13 +78,32 @@
       </form>
       {% endif %}
     </div>
+    {% if last_status %}
+    <div class="card status-card {{ last_status.health }}">
+      <div class="card-head"><h3>Son durum</h3><span class="small muted">{{ last_status.created_at|ago }} · {{ last_status.uname or '—' }}</span></div>
+      <div class="row">{{ health(last_status.health) }}<span class="badge stage">{{ D.STAGE_LABELS.get(last_status.stage, '') }}</span>
+        {% if last_status.progress is not none %}<span class="spacer"></span><b>%{{ last_status.progress }}</b>{% endif %}</div>
+      {% if last_status.progress is not none %}<div class="meter"><span style="width:{{ last_status.progress }}%"></span></div>{% endif %}
+      {% if last_status.summary %}<p class="small" style="margin:10px 0 4px">{{ last_status.summary }}</p>{% endif %}
+      {% if last_status.blockers %}<div class="small"><b>Engel:</b> {{ last_status.blockers }}</div>{% endif %}
+      {% if last_status.next_steps %}<div class="small muted"><b>Sonraki:</b> {{ last_status.next_steps }}</div>{% endif %}
+    </div>
+    {% endif %}
     {% if user.role in D.CAN_UPLOAD %}
-    <div class="card">
-      <h3>Hızlı durum güncellemesi</h3>
+    <div class="card" id="durum">
+      <h3>Durum güncelle</h3>
       <form method="post" action="/projeler/{{ p.id }}/durum">
-        <div class="row" style="margin-bottom:10px">{% for k, v in D.HEALTH.items() %}<label class="row" style="margin:0;font-weight:500"><input type="radio" name="health" value="{{ k }}" {{ 'checked' if p.health == k }}> <span class="health {{ k }}">{{ v[0] }}</span></label>{% endfor %}</div>
-        <textarea name="note" placeholder="Bu hafta ne oldu? Engel var mı?"></textarea>
-        <button class="btn sm" style="margin-top:8px">Kaydet</button>
+        <div class="seg-radio" style="margin-bottom:10px">{% for k, v in D.HEALTH.items() %}<label><input type="radio" name="health" value="{{ k }}" {{ 'checked' if p.health == k }}><span class="health {{ k }}">{{ v[0] }}</span></label>{% endfor %}</div>
+        <div class="row">
+          <div style="flex:2;min-width:140px"><label>Aşama</label><select name="stage">{% for k, l, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if p.stage == k }}>{{ l }}</option>{% endfor %}</select></div>
+          <div style="flex:1;min-width:90px"><label>İlerleme %</label><input name="progress" inputmode="numeric" placeholder="{{ last_status.progress if last_status and last_status.progress is not none else '0-100' }}"></div>
+        </div>
+        <div class="field" style="margin-top:10px"><label>Bu dönem ne oldu?</label><textarea name="summary" rows="3"></textarea></div>
+        <div class="field"><label>Engel / bağımlılık</label><input name="blockers"></div>
+        <div class="field"><label>Sonraki adım</label><input name="next_steps"></div>
+        <div class="field"><label>Hedef tarih değişti mi?</label><input type="date" name="target_date"></div>
+        <button class="btn primary sm">Kaydet</button>
+        <a class="small" href="/durum-girisi" style="margin-left:8px">Tüm projeleri toplu güncelle →</a>
       </form>
     </div>
     {% endif %}
@@ -149,6 +169,18 @@
       {% elif synthesis %}<div class="prose">{{ synthesis.body|md }}</div>
       {% else %}<p class="muted">Henüz sentez yok. Sağ üstteki <b>Tüm kaynaklardan sentez üret</b> ile DT raporlarını, iç notları, PDD ve kazanım dokümanlarını birlikte değerlendirin.</p>{% endif %}
     </div>
+    {% if status_hist %}
+    <div class="card">
+      <div class="card-head"><h2>Durum güncellemeleri</h2><span class="muted small">Elle girilenler</span></div>
+      <ul class="feed">{% for s in status_hist %}
+        <li class="ft-manual"><div class="row small"><span class="badge">Manuel</span>{{ health(s.health) }}<span class="muted">{{ D.STAGE_LABELS.get(s.stage, '') }}{% if s.progress is not none %} · %{{ s.progress }}{% endif %}</span><span class="spacer"></span><span class="muted">{{ s.uname or '' }} · {{ s.created_at|date }}</span></div>
+          {% if s.summary %}<div class="small" style="margin-top:3px">{{ s.summary }}</div>{% endif %}
+          {% if s.blockers %}<div class="small"><b>Engel:</b> {{ s.blockers }}</div>{% endif %}
+          {% if s.next_steps %}<div class="small muted"><b>Sonraki:</b> {{ s.next_steps }}</div>{% endif %}
+          {% if s.target_date %}<div class="small muted"><b>Yeni hedef:</b> {{ s.target_date|date }}</div>{% endif %}</li>
+      {% endfor %}</ul>
+    </div>
+    {% endif %}
     <div class="card">
       <div class="card-head"><h2>Bilgi akışı</h2><span class="muted small">Dokümanlardan çıkarılan durum, risk, karar ve notlar · yeniden eskiye</span></div>
       <ul class="feed">{% for f in status_timeline %}

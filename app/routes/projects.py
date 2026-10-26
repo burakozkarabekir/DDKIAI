@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from markupsafe import Markup
 
-from .. import ai, db, domain, knowledge, pipeline, timeline
+from .. import ai, copilot, db, domain, knowledge, org, pipeline, status, timeline
 from ..auth import require_editor, require_internal, require_uploader, require_user
 from ..web import (back, departments, flash, get_project, parse_float, redirect, render, visible_projects)
 
@@ -44,7 +44,28 @@ def dashboard(request: Request, user=Depends(require_user)):
     value = {"live_estimated": sum(p["estimated_value"] or 0 for p in live), "realized": sum(p["realized_value"] or 0 for p in projects)}
     tl = timeline.load()
     q = timeline.quarterly(tl)
-    return render(request, "dashboard.html", user, projects=projects, active=active, live=live, measured=measured,
+    # departman × aşama matrisi ve marka kırılımı (iptaller hariç)
+    open_projects = [p for p in projects if p["stage"] != "iptal"]
+    matrix = []
+    for d in org.departments():
+        ps = [p for p in open_projects if p["department_id"] == d["id"]]
+        matrix.append({"id": d["id"], "name": d["name"], "total": len(ps),
+                       "live": sum(1 for p in ps if p["stage"] in ("canli", "olcekleme")),
+                       "risky": sum(1 for p in ps if p["health"] == "kirmizi"),
+                       "cells": [sum(1 for p in ps if p["stage"] == k) for k, _, _ in domain.STAGES + domain.SIDE_STAGES[:1]]})
+    matrix_max = max([c for m in matrix for c in m["cells"]] or [0]) or 1
+    open_ids = {p["id"] for p in open_projects}
+    brand_counts = db.rows("SELECT b.id, b.name, d.name AS dept, COUNT(pb.project_id) AS n FROM brands b "
+                           "LEFT JOIN departments d ON d.id = b.department_id "
+                           f"JOIN project_brands pb ON pb.brand_id = b.id AND pb.project_id IN ({','.join(map(str, open_ids)) or '0'}) "
+                           "GROUP BY b.id ORDER BY n DESC, b.name LIMIT 14")
+    week_ago = (date.today().toordinal() - 7)
+    recent_updates = db.row("SELECT COUNT(*) AS n FROM status_updates WHERE created_at >= ?",
+                            (date.fromordinal(week_ago).isoformat(),))["n"]
+    doc_counts = {r["doc_type"]: r["n"] for r in db.rows("SELECT doc_type, COUNT(*) AS n FROM documents GROUP BY doc_type")}
+    return render(request, "dashboard.html", user, matrix=matrix, matrix_max=matrix_max, brand_counts=brand_counts,
+                  copilot=copilot.headline(), recent_updates=recent_updates, doc_counts=doc_counts,
+                  matrix_stages=domain.STAGES + domain.SIDE_STAGES[:1], projects=projects, active=active, live=live, measured=measured,
                   stage_counts=stage_counts, side_counts=side_counts, health_counts=health_counts, risky=risky[:7],
                   unmeasured_live=[p for p in live if p not in measured], actions=actions, latest_insight=latest_insight,
                   stale=ai.stale_projects(), value=value, coverage=ai.coverage(), recent_comments=recent_comments,
@@ -68,7 +89,7 @@ def timeline_page(request: Request, departman: str = "", stage: str = "", yil: s
 
 # ------------------------------------------------------------------ projeler
 
-PROJECT_FIELDS = ["name", "aliases", "tags", "summary", "problem", "solution", "business_unit", "brands", "ai_type", "health", "priority",
+PROJECT_FIELDS = ["name", "aliases", "tags", "summary", "problem", "solution", "business_unit", "ai_type", "health", "priority",
                   "sponsor", "owner", "dt_lead", "start_date", "target_date", "golive_date", "measurement_status", "estimated_value",
                   "realized_value", "fte_saving", "security_review", "data_class"]
 NUMERIC = {"estimated_value", "realized_value", "fte_saving"}
@@ -76,7 +97,7 @@ NUMERIC = {"estimated_value", "realized_value", "fte_saving"}
 
 @router.get("/projeler", response_class=HTMLResponse)
 def project_list(request: Request, view: str = "pano", q: str = "", stage: str = "", health: str = "", departman: str = "",
-                 olcum: str = "", user=Depends(require_user)):
+                 olcum: str = "", marka: str = "", user=Depends(require_user)):
     where, params = ["1=1"], []
     if q:
         where.append("(p.name LIKE ? OR p.code LIKE ? OR p.summary LIKE ? OR p.brands LIKE ? OR p.aliases LIKE ?)")
@@ -88,18 +109,25 @@ def project_list(request: Request, view: str = "pano", q: str = "", stage: str =
     if departman.isdigit():
         where.append("p.department_id = ?")
         params.append(int(departman))
+    if marka.isdigit():
+        where.append("p.id IN (SELECT project_id FROM project_brands WHERE brand_id = ?)")
+        params.append(int(marka))
     projects = visible_projects(user, " AND ".join(where), tuple(params))
+    brand_map = org.brands_by_project()
+    for p in projects:
+        p["brand_list"] = brand_map.get(p["id"], [])
     counts = {r["target_id"]: r["n"] for r in db.rows(
         "SELECT target_id, COUNT(*) AS n FROM comments WHERE target_type = 'project' GROUP BY target_id")}
     docs = {r["project_id"]: r["n"] for r in db.rows("SELECT project_id, COUNT(*) AS n FROM document_links GROUP BY project_id")}
     pend = {r["project_id"]: r["n"] for r in db.rows("SELECT project_id, COUNT(*) AS n FROM facts WHERE status = 'oneri' GROUP BY project_id")}
     return render(request, "projects.html", user, projects=projects, view=view, counts=counts, docs=docs, pend=pend,
-                  departments=departments(), filters={"q": q, "stage": stage, "health": health, "departman": departman, "olcum": olcum})
+                  departments=departments(), brands=org.brands(),
+                  filters={"q": q, "stage": stage, "health": health, "departman": departman, "olcum": olcum, "marka": marka})
 
 
 @router.get("/projeler/yeni", response_class=HTMLResponse)
 def project_new(request: Request, ad: str = "", user=Depends(require_editor)):
-    return render(request, "project_form.html", user, departments=departments(),
+    return render(request, "project_form.html", user, departments=departments(), brand_groups=org.grouped_brands(), selected_brands=[],
                   project={"name": ad, "stage": "fikir", "health": "yesil", "priority": "Orta", "measurement_status": "yok",
                            "security_review": "yok", "visible_to_dt": 1})
 
@@ -117,6 +145,10 @@ def _project_data(form) -> dict:
     return data
 
 
+def _form_brands(form) -> list[int]:
+    return [int(v) for v in form.getlist("brand_ids") if str(v).isdigit()]
+
+
 @router.post("/projeler")
 async def project_create(request: Request, user=Depends(require_editor)):
     form = await request.form()
@@ -124,9 +156,12 @@ async def project_create(request: Request, user=Depends(require_editor)):
     if not data.get("name"):
         raise HTTPException(400, "Proje adı zorunludur")
     n = (db.scalar("SELECT MAX(CAST(substr(code, 4) AS INTEGER)) FROM projects WHERE code LIKE 'AI-%'") or 0) + 1
+    custom = str(form.get("code") or "").strip().upper()[:20]
     ts = db.now()
     stage = form.get("stage") if form.get("stage") in domain.STAGE_LABELS else "fikir"
-    pid = db.insert("projects", {**data, "code": f"AI-{n:03d}", "stage": stage, "created_at": ts, "updated_at": ts})
+    code = custom if custom and not db.scalar("SELECT 1 FROM projects WHERE code = ?", (custom,)) else f"AI-{n:03d}"
+    pid = db.insert("projects", {**data, "code": code, "stage": stage, "created_at": ts, "updated_at": ts})
+    org.set_project_brands(pid, _form_brands(form))
     db.insert("stage_history", {"project_id": pid, "from_stage": None, "to_stage": stage, "note": "Kayıt açıldı",
                                 "user_id": user["id"], "at": ts})
     src = str(form.get("from_fact") or "")
@@ -157,7 +192,9 @@ def project_detail(request: Request, pid: int, tab: str = "genel", user=Depends(
     next_stage = None
     if p["stage"] in domain.STAGE_ORDER and p["stage"] != domain.STAGE_ORDER[-1]:
         next_stage = domain.STAGE_ORDER[domain.STAGE_ORDER.index(p["stage"]) + 1]
+    status_hist = status.history(pid)
     return render(request, "project_detail.html", user, p=p, kpis=kpis, documents=documents, gates=gates, history=history,
+                  status_hist=status_hist, last_status=status_hist[0] if status_hist else None,
                   comments=comments, actions=actions, tab=tab, next_stage=next_stage, facts=facts, synthesis=synthesis,
                   synth_job=synth_job, pending=knowledge.pending(pid), conflicts=knowledge.conflicts(pid),
                   status_timeline=[f for f in facts if f["fact_type"] in ("durum", "saglik", "risk", "engel", "sonraki_adim", "karar", "not", "olcum")])
@@ -165,7 +202,8 @@ def project_detail(request: Request, pid: int, tab: str = "genel", user=Depends(
 
 @router.get("/projeler/{pid}/duzenle", response_class=HTMLResponse)
 def project_edit(request: Request, pid: int, user=Depends(require_editor)):
-    return render(request, "project_form.html", user, project=get_project(pid, user), departments=departments())
+    return render(request, "project_form.html", user, project=get_project(pid, user), departments=departments(),
+                  brand_groups=org.grouped_brands(), selected_brands=org.project_brand_ids(pid))
 
 
 @router.post("/projeler/{pid}")
@@ -181,6 +219,7 @@ async def project_update(request: Request, pid: int, user=Depends(require_editor
             data["code"] = code[:20]
     data["updated_at"] = db.now()
     db.update("projects", pid, data)
+    org.set_project_brands(pid, _form_brands(form), infer_department=not data.get("department_id"))
     db.log(user["id"], "project_updated", "project", pid)
     flash(request, "Proje güncellendi.")
     return redirect(f"/projeler/{pid}")
@@ -224,17 +263,46 @@ def project_stage(request: Request, pid: int, to_stage: str = Form(...), note: s
 
 
 @router.post("/projeler/{pid}/durum")
-def project_status_note(request: Request, pid: int, health: str = Form(...), note: str = Form(""), user=Depends(require_uploader)):
-    p = get_project(pid, user)
-    if health not in domain.HEALTH:
-        raise HTTPException(400, "Geçersiz sağlık değeri")
-    ts = db.now()
-    db.update("projects", pid, {"health": health, "last_status_at": ts, "updated_at": ts})
-    body = f"**Durum güncellemesi:** {domain.HEALTH[health][0]}" + (f"\n\n{note}" if note.strip() else "")
-    db.insert("comments", {"target_type": "project", "target_id": pid, "user_id": user["id"], "body": body, "kind": "durum", "created_at": ts})
-    db.log(user["id"], "status_updated", "project", pid, f"{p['code']} → {domain.HEALTH[health][0]}")
-    flash(request, "Durum güncellendi.")
+async def project_status_update(request: Request, pid: int, user=Depends(require_uploader)):
+    """Elle durum güncellemesi: sağlık, aşama, ilerleme, özet, engel, sonraki adım, hedef tarih."""
+    get_project(pid, user)
+    f = await request.form()
+    sid = status.record(pid, user["id"], health=f.get("health"), stage=f.get("stage"), progress=f.get("progress"),
+                        summary=f.get("summary"), blockers=f.get("blockers"), next_steps=f.get("next_steps"),
+                        target_date=f.get("target_date"))
+    flash(request, "Durum güncellendi." if sid else "Değişiklik yok; kaydedilecek bir bilgi girilmedi.", "ok" if sid else "warn")
     return redirect(f"/projeler/{pid}")
+
+
+@router.get("/durum-girisi", response_class=HTMLResponse)
+def bulk_status_page(request: Request, departman: str = "", tumu: str = "", user=Depends(require_uploader)):
+    where = "p.stage NOT IN ('iptal')" if tumu else "p.stage IN ('analiz','onay','gelistirme','pilot','canli','olcekleme','beklemede')"
+    params: tuple = ()
+    if departman.isdigit():
+        where += " AND p.department_id = ?"
+        params = (int(departman),)
+    projects = visible_projects(user, where, params)
+    last = status.latest_by_project()
+    brand_map = org.brands_by_project()
+    for p in projects:
+        p["last"] = last.get(p["id"])
+        p["brand_list"] = brand_map.get(p["id"], [])
+    projects.sort(key=lambda p: (domain.STAGE_ORDER.index(p["stage"]) if p["stage"] in domain.STAGE_ORDER else 99, p["code"]))
+    return render(request, "status_bulk.html", user, projects=projects, departments=departments(), departman=departman, tumu=tumu)
+
+
+@router.post("/durum-girisi")
+async def bulk_status_save(request: Request, user=Depends(require_uploader)):
+    f = await request.form()
+    pids = {int(k.split("_")[1]) for k in f.keys() if k.startswith("p_") and k.split("_")[1].isdigit()}
+    n = 0
+    for pid in sorted(pids):
+        g = lambda k: f.get(f"p_{pid}_{k}")  # noqa: E731
+        if status.record(pid, user["id"], health=g("health"), stage=g("stage"), progress=g("progress"), summary=g("summary"),
+                         blockers=g("blockers"), next_steps=g("next_steps")):
+            n += 1
+    flash(request, f"{n} projenin durumu güncellendi." if n else "Değişiklik yapılan proje yok.", "ok" if n else "warn")
+    return back(request, "/durum-girisi")
 
 
 @router.post("/projeler/{pid}/sentez")

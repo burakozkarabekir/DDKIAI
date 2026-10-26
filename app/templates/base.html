@@ -14,18 +14,23 @@
     <div class="brand"><div class="brand-mark">AI</div><div><b>{{ APP_NAME }}</b><span>{{ ORG_NAME }}</span></div></div>
     {% set internal = user.role != 'dt' %}
     <div class="nav-section">Takip</div>
-    {% if internal %}<a href="/" class="{{ 'active' if path == '/' }}">{{ icon('home') }} Yönetici Özeti</a>{% endif %}
+    {% if internal %}<a href="/" class="{{ 'active' if path == '/' }}">{{ icon('home') }} Genel Bakış</a>{% endif %}
     <a href="/projeler" class="{{ 'active' if path.startswith('/projeler') }}">{{ icon('grid') }} Projeler</a>
+    {% if internal %}<a href="/durum-girisi" class="{{ 'active' if path.startswith('/durum-girisi') }}">{{ icon('pulse') }} Durum Girişi</a>{% endif %}
     <a href="/zaman-cizelgesi" class="{{ 'active' if path.startswith('/zaman') }}">{{ icon('timeline') }} Zaman Çizelgesi</a>
     {% if internal %}
     <a href="/aksiyonlar" class="{{ 'active' if path.startswith('/aksiyon') }}">{{ icon('check') }} Aksiyonlar</a>
     <div class="nav-section">Doküman & Bilgi</div>
-    <a href="/dokumanlar" class="{{ 'active' if path.startswith('/dokuman') }}">{{ icon('folder') }} Dokümanlar{% if nav.processing %}<span class="nav-badge busy" title="İşlenen doküman">{{ nav.processing }}</span>{% endif %}</a>
+    <a href="/alan/yonetici-raporlari" class="{{ 'active' if path.startswith('/alan/yonetici') }}">{{ icon('report') }} Yönetici Raporları</a>
     <a href="/raporlar" class="{{ 'active' if path.startswith('/raporlar') }}">{{ icon('file') }} DT Raporları</a>
+    <a href="/dokumanlar" class="{{ 'active' if path.startswith('/dokuman') }}">{{ icon('folder') }} Tüm Dokümanlar{% if nav.processing %}<span class="nav-badge busy" title="İşlenen doküman">{{ nav.processing }}</span>{% endif %}</a>
     <a href="/inceleme" class="{{ 'active' if path.startswith('/inceleme') }}">{{ icon('inbox') }} İnceleme Kuyruğu{% if nav.pending %}<span class="nav-badge">{{ nav.pending }}</span>{% endif %}</a>
     <a href="/danisman" class="{{ 'active' if path.startswith('/danisman') }}">{{ icon('spark') }} AI Danışman</a>
-    <div class="nav-section">Yönetişim</div>
-    <a href="/guvenlik" class="{{ 'active' if path.startswith('/guvenlik') }}">{{ icon('shield') }} AI Security</a>
+    <div class="nav-section">AI Security</div>
+    <a href="/guvenlik" class="{{ 'active' if path == '/guvenlik' or (path.startswith('/guvenlik/') and not path.startswith('/guvenlik/copilot')) }}">{{ icon('shield') }} Genel & Girişimler</a>
+    <a href="/guvenlik/copilot" class="{{ 'active' if path.startswith('/guvenlik/copilot') }}">{{ icon('chart') }} Copilot Kullanımı</a>
+    <a href="/alan/ai-yonetisimi" class="{{ 'active' if path.startswith('/alan/ai-yonetisimi') }}">{{ icon('scale') }} AI Yönetişimi</a>
+    <div class="nav-section">Sistem</div>
     {% endif %}
     <a href="/surec" class="{{ 'active' if path.startswith('/surec') }}">{{ icon('flow') }} Süreç & Kurallar</a>
     {% if user.role in D.CAN_EDIT %}<a href="/ayarlar" class="{{ 'active' if path.startswith('/ayarlar') }}">{{ icon('cog') }} Ayarlar</a>{% endif %}
@@ -48,6 +53,16 @@
     </div>
   </main>
 </div>
+{% if internal and not path.startswith('/danisman') %}
+<div class="fab-chat" id="fab-chat" data-page="{{ path }}">
+  <button class="fab-btn" type="button" data-fab-toggle aria-label="AI Danışman ile konuş">{{ icon('spark') }}<span>AI'a sor</span></button>
+  <section class="fab-panel" aria-label="AI Danışman" hidden>
+    <header><div class="fab-title">{{ icon('spark') }}<div><b>AI Danışman</b><small data-fab-ctx>Portföy, dokümanlar ve metrikler üzerinden yanıtlar</small></div></div>
+      <div class="row"><a class="fab-ico" href="/danisman" title="Tam ekran">{{ icon('expand') }}</a><button class="fab-ico" type="button" data-fab-clear title="Sohbeti temizle">⟲</button><button class="fab-ico" type="button" data-fab-toggle title="Kapat">{{ icon('close') }}</button></div></header>
+    <div class="fab-log" data-fab-log><div class="fab-empty">Merhaba! Projeler, DT raporları, yönetici özetleri veya Copilot metrikleri hakkında soru sorabilirsiniz.<div class="fab-sugg" data-fab-sugg></div></div></div>
+    <form class="fab-form" data-fab-form><textarea rows="1" placeholder="Sorunuzu yazın…" required></textarea><button class="fab-send" aria-label="Gönder">{{ icon('send') }}</button></form>
+  </section>
+</div>{% endif %}
 <script src="/static/js/app.js"></script>
 </body>
 </html>

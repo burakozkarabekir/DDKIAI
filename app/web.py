@@ -148,6 +148,8 @@ def get_project(pid: int, user: dict) -> dict:
     p = db.row("SELECT p.*, d.name AS dept FROM projects p LEFT JOIN departments d ON d.id = p.department_id WHERE p.id = ?", (pid,))
     if not p or not can_see_project(user, p):
         raise HTTPException(404, "Proje bulunamadı")
+    p["brand_list"] = [r["name"] for r in db.rows("SELECT b.name FROM project_brands pb JOIN brands b ON b.id = pb.brand_id "
+                                                  "WHERE pb.project_id = ? ORDER BY b.sort", (pid,))]
     return p
 
 
@@ -159,4 +161,5 @@ def visible_projects(user: dict, where: str = "1=1", params=()) -> list[dict]:
 
 
 def departments(active_only: bool = True) -> list[dict]:
-    return db.rows("SELECT * FROM departments" + (" WHERE active = 1" if active_only else "") + " ORDER BY sort, name")
+    from .org import departments as _departments
+    return _departments(active_only)

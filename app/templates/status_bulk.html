@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import health %}
+{% block title %}Haftalık Durum Girişi{% endblock %}
+{% block crumbs %}{{ projects|length }} proje{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Haftalık durum girişi</h1>
+<p>Tüm aktif projelerin durumunu tek ekrandan güncelleyin. Yalnızca değiştirdiğiniz satırlar kaydedilir; her kayıt projenin
+bilgi akışına ve AI analizine dokümanlardan gelen bilgilerle birlikte girer.</p></div>
+<div class="row"><a class="btn {{ '' if tumu else 'primary' }} sm" href="?departman={{ departman }}">Aktif projeler</a><a class="btn {{ 'primary' if tumu else '' }} sm" href="?tumu=1&departman={{ departman }}">Tümü</a></div></div>
+<form class="filters" method="get"><input type="hidden" name="tumu" value="{{ tumu }}">
+  <select name="departman" data-autosubmit><option value="">Tüm departmanlar</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if departman == d.id|string }}>{{ d.name }}</option>{% endfor %}</select>
+</form>
+<form method="post" action="/durum-girisi" class="bulk">
+  <div class="bulk-bar"><span class="small muted">Değiştirdiğiniz satırlar <b>vurgulanır</b>.</span><span class="spacer"></span><button class="btn primary">Değişiklikleri kaydet</button></div>
+  <div class="table-wrap">
+  <table class="bulk-table">
+    <thead><tr><th style="min-width:230px">Proje</th><th>Sağlık</th><th>Aşama</th><th style="width:90px">İlerleme %</th><th style="min-width:240px">Bu hafta / özet</th><th style="min-width:180px">Engel</th><th style="min-width:180px">Sonraki adım</th></tr></thead>
+    <tbody>
+    {% for p in projects %}
+    <tr data-row>
+      <td><input type="hidden" name="p_{{ p.id }}_id" value="1"><span class="code">{{ p.code }}</span> <a href="/projeler/{{ p.id }}">{{ p.name|truncate(46) }}</a>
+        <div class="small muted">{{ p.dept or '—' }}{% if p.brand_list %} · {{ p.brand_list|join(', ') }}{% endif %}</div>
+        {% if p.last %}<div class="small muted" title="{{ p.last.summary or '' }}">Son: {{ p.last.created_at|ago }}{% if p.last.progress is not none %} · %{{ p.last.progress }}{% endif %}</div>{% endif %}</td>
+      <td><select name="p_{{ p.id }}_health" class="h-select" data-orig="{{ p.health }}">{% for k, v in D.HEALTH.items() %}<option value="{{ k }}" {{ 'selected' if p.health == k }}>{{ v[0] }}</option>{% endfor %}</select></td>
+      <td><select name="p_{{ p.id }}_stage" data-orig="{{ p.stage }}">{% for k, l, _ in D.STAGES + D.SIDE_STAGES %}<option value="{{ k }}" {{ 'selected' if p.stage == k }}>{{ l }}</option>{% endfor %}</select></td>
+      <td><input name="p_{{ p.id }}_progress" inputmode="numeric" placeholder="{{ p.last.progress if p.last and p.last.progress is not none else '' }}"></td>
+      <td><textarea name="p_{{ p.id }}_summary" rows="1" placeholder="Ne oldu?"></textarea></td>
+      <td><textarea name="p_{{ p.id }}_blockers" rows="1"></textarea></td>
+      <td><textarea name="p_{{ p.id }}_next_steps" rows="1"></textarea></td>
+    </tr>
+    {% else %}<tr><td colspan="7" class="empty">Bu filtrede proje yok.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary">Değişiklikleri kaydet</button></div>
+</form>
+{% endblock %}

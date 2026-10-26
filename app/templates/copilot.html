@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import security_tabs %}
+{% block title %}Copilot Kullanımı{% endblock %}
+{% block crumbs %}AI Security / Copilot kullanımı{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Copilot kullanımı</h1>
+<p>Microsoft 365 Copilot kullanım raporlarınızı (Excel/CSV) yükleyin: benimseme, departman ve uygulama kırılımı, kullanılmayan lisanslar
+ve dönemsel eğilim hesaplanır. Ad ve e-posta bilgileri yalnızca bu uygulamada kalır; AI'a sadece toplamlar gönderilir.</p></div>
+<form method="post" action="/guvenlik/copilot/analiz"><button class="btn primary" {{ 'disabled' if not sets }} data-busy="Analiz kuyruğa alınıyor…">✦ AI ile analiz et</button></form></div>
+{{ security_tabs('copilot') }}
+
+{% if not sets %}
+<div class="card hero-empty">
+  <h2>İlk Copilot raporunuzu yükleyin</h2>
+  <p class="muted">Microsoft 365 yönetim merkezi → Raporlar → Kullanım → <b>Microsoft 365 Copilot</b> → Dışa aktar (CSV), ya da kendi Excel'iniz.
+    Sütunlar (kullanıcı, departman, son etkinlik, uygulama bazında kullanım, sayısal metrikler) otomatik tanınır; gerekirse düzeltirsiniz.</p>
+  {% include "partials/copilot_upload.html" %}
+</div>
+{% else %}
+{% if a and a.kind == 'user' %}
+<div class="grid g4 kpis">
+  <div class="card stat glow"><div class="label">Benimseme</div><div class="value" data-count="{{ a.adoption }}" data-prefix="%">%{{ a.adoption }}</div>
+    <div class="sub">Son {{ 28 }} günde Copilot kullanan / lisanslı</div><div class="meter"><span style="width:{{ a.adoption }}%"></span></div></div>
+  <div class="card stat"><div class="label">Aktif kullanıcı</div><div class="value" data-count="{{ a.active }}">{{ a.active }}</div><div class="sub">{{ a.total }} lisanslı kullanıcıdan</div></div>
+  <div class="card stat"><div class="label">Kullanılmayan lisans</div><div class="value {{ 'risk hi' if a.inactive > a.active }}" data-count="{{ a.inactive }}">{{ a.inactive }}</div><div class="sub">{{ a.never }} kişi hiç kullanmamış</div></div>
+  <div class="card stat"><div class="label">Rapor tarihi</div><div class="value" style="font-size:22px">{{ a.refresh_date|date }}</div><div class="sub">{{ current.title|truncate(40) }}</div></div>
+</div>
+
+<div class="grid g-main" style="margin-top:16px">
+  <div class="card">
+    <div class="card-head"><h2>Departman bazında benimseme</h2><span class="small muted">aktif / lisanslı</span></div>
+    {% if a.has_dept %}
+    {% set maxt = (a.departments|map(attribute='total')|max) or 1 %}
+    <div class="hbars">{% for d in a.departments[:20] %}
+      <div class="hbar" data-tip="{{ d.name }}: {{ d.active }}/{{ d.total }} aktif (%{{ d.pct }})"><span class="hb-label">{{ d.name }}</span>
+        <span class="hb-track"><span class="hb-total" style="width:{{ d.total / maxt * 100 }}%"></span><span class="hb-fill" style="width:{{ d.active / maxt * 100 }}%"></span></span>
+        <span class="hb-val">%{{ d.pct }} <span class="muted">{{ d.active }}/{{ d.total }}</span></span></div>{% endfor %}</div>
+    <div class="legend"><span><i style="background:var(--s1)"></i>Aktif</span><span><i style="background:var(--seq-250);opacity:.45"></i>Lisanslı</span></div>
+    {% else %}<p class="muted small">Dosyada departman sütunu tanınmadı. Aşağıdaki sütun eşlemesinden bir sütunu "Departman / birim" yapın.</p>{% endif %}
+  </div>
+  <div class="stack">
+    <div class="card"><div class="card-head"><h3>Uygulama bazında</h3><span class="small muted">son 28 gün aktif</span></div>
+      {% set maxa = (a.apps|map(attribute='users')|max) or 1 %}
+      <div class="hbars">{% for x in a.apps %}<div class="hbar" data-tip="{{ x.app }}: {{ x.users }} kullanıcı (%{{ x.pct }})"><span class="hb-label">{{ x.app }}</span>
+        <span class="hb-track"><span class="hb-fill s2" style="width:{{ x.users / maxa * 100 }}%"></span></span><span class="hb-val">{{ x.users }}</span></div>
+      {% else %}<p class="muted small">Uygulama sütunu yok.</p>{% endfor %}</div></div>
+    <div class="card"><div class="card-head"><h3>Son etkinlik</h3></div>
+      {% set tot = a.total or 1 %}
+      <div class="stackbar tall">{% for k, v in a.buckets.items() if v %}<span class="rb{{ loop.index }}" style="width:{{ v / tot * 100 }}%" data-tip="{{ k }}: {{ v }}"></span>{% endfor %}</div>
+      <div class="legend">{% for k, v in a.buckets.items() %}<span><i class="rb{{ loop.index }}"></i>{{ k }} · {{ v }}</span>{% endfor %}</div></div>
+    {% if trend_chart %}<div class="card"><div class="card-head"><h3>Benimseme eğilimi</h3></div>{{ trend_chart }}</div>{% endif %}
+  </div>
+</div>
+{% elif a %}
+<div class="card" style="margin-top:4px">
+  <div class="card-head"><h2>{{ current.title }}</h2><span class="small muted">Özet tablo · boyut: {{ a.dimension or '—' }}</span></div>
+  <div class="grid g4 kpis" style="margin-bottom:14px">{% for m, v in a.totals.items() %}<div class="mini"><span class="label">{{ m }}</span><b>{{ v|num }}</b></div>{% endfor %}</div>
+  {% if a.metrics %}{% set m0 = a.metrics[0] %}{% set mx = (a.groups|map(attribute=m0)|max) or 1 %}
+  <div class="hbars">{% for g in a.groups[:25] %}<div class="hbar"><span class="hb-label">{{ g.name }}</span><span class="hb-track"><span class="hb-fill" style="width:{{ g[m0] / mx * 100 }}%"></span></span><span class="hb-val">{{ g[m0]|num }}</span></div>{% endfor %}</div>
+  <div class="table-wrap" style="margin-top:14px;border:0"><table><thead><tr><th>{{ a.dimension or 'Grup' }}</th>{% for m in a.metrics %}<th class="num">{{ m }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for g in a.groups %}<tr><td>{{ g.name }}</td>{% for m in a.metrics %}<td class="num">{{ g[m]|num }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% endif %}
+</div>
+{% endif %}
+
+<div class="grid g-main" style="margin-top:16px">
+  <div class="card ai-card" {% if running %}data-poll-job="copilot/0"{% endif %}>
+    <div class="card-head"><h2>AI analizi</h2>{% if insight %}<span class="small muted">{{ insight.created_at|ago }}</span>{% endif %}</div>
+    {% if running %}<p class="muted">Analiz hazırlanıyor…</p>{% elif insight %}<div class="prose">{{ insight.body|md }}</div>
+    {% else %}<p class="muted">Henüz analiz yok. <b>AI ile analiz et</b> düğmesine basın.</p>{% endif %}
+  </div>
+  <div class="stack">
+    <div class="card"><h3>Rapor yükle</h3>{% include "partials/copilot_upload.html" %}</div>
+    <div class="card"><h3>Veri setleri</h3>
+      <ul class="list-plain small">{% for d in sets %}<li class="row"><a href="?ds={{ d.id }}" class="{{ 'b' if current and d.id == current.id }}">{{ d.title|truncate(34) }}</a>
+        <span class="spacer"></span><span class="muted">{{ d.period or '—' }} · {{ d.row_count }} satır · {{ 'kişi' if d.kind == 'user' else 'özet' }}</span>
+        <form method="post" action="/guvenlik/copilot/{{ d.id }}/sil" data-confirm="Veri seti silinsin mi?"><button class="btn ghost sm danger">✕</button></form></li>{% endfor %}</ul></div>
+  </div>
+</div>
+
+{% if current %}
+<div class="card" id="sutunlar" style="margin-top:16px">
+  <div class="card-head"><h2>Sütun eşlemesi · {{ current.title|truncate(50) }}</h2><span class="small muted">Yanlış tanınan sütun varsa değiştirin, kaydedin.</span></div>
+  <form method="post" action="/guvenlik/copilot/{{ current.id }}/sutunlar">
+    <div class="table-wrap" style="border:0"><table>
+      <thead><tr><th>Sütun</th><th>Rol</th><th>Örnek değerler</th></tr></thead>
+      <tbody>{% for c in columns %}<tr><td><b>{{ c.name }}</b></td>
+        <td><select name="role_{{ c.name }}">{% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if c.role == k }}>{{ v }}</option>{% endfor %}</select></td>
+        <td class="small muted">{% for r in sample[:3] %}{{ (r[c.name]|string)[:28] if r[c.name] is not none else '—' }}{{ ' · ' if not loop.last }}{% endfor %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    <div class="row" style="margin-top:10px"><div><label>Dönem (YYYY-AA)</label><input name="period" value="{{ current.period or '' }}" style="width:140px"></div><span class="spacer"></span><button class="btn primary">Kaydet</button></div>
+  </form>
+</div>
+{% if a and a.kind == 'user' and a.inactive_list %}
+<details class="card inline" style="margin-top:16px"><summary><h3 style="display:inline">Son 28 günde kullanmayan lisans sahipleri ({{ a.inactive }})</h3> <span class="small muted">lisans optimizasyonu için · yalnızca bu ekranda gösterilir</span></summary>
+  <div class="table-wrap" style="margin-top:10px;border:0;max-height:420px;overflow:auto"><table><thead><tr><th>Kullanıcı</th><th>Departman</th><th>Son etkinlik</th></tr></thead>
+    <tbody>{% for u in a.inactive_list %}<tr><td class="small">{{ u.name or '—' }}</td><td class="small">{{ u.dept }}</td><td class="small">{{ u.last|date if u.last else 'hiç' }}</td></tr>{% endfor %}</tbody></table></div>
+</details>
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}

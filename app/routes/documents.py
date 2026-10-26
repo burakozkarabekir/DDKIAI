@@ -1,9 +1,14 @@
 """Doküman yükleme ve kütüphane, doküman detayı, inceleme kuyruğu, DT durum raporları görünümü."""
+import json
+import re
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
+from markupsafe import Markup
 
-from .. import db, domain, knowledge, pipeline
+from .. import copilot, db, domain, knowledge, pipeline
 from ..auth import require_editor, require_internal
+from ..charts import line_chart
 from ..storage import UploadError, path_of, save_stream
 from ..web import back, departments, flash, parse_float, redirect, render
 
@@ -293,3 +298,115 @@ def reports(request: Request, user=Depends(require_internal)):
     weekly = db.rows("SELECT * FROM ai_insights WHERE kind = 'weekly' ORDER BY id DESC LIMIT 6")
     return render(request, "reports.html", user, reports=reps, cols=cols, grid=grid, heat_projects=heat_projects, notes=notes,
                   weekly=weekly, status_labels=STATUS, departments=departments())
+
+
+# ------------------------------------------------------------------ doküman alanları (Yönetici Raporları, AI Yönetişimi)
+
+@router.get("/alan/{key}", response_class=HTMLResponse)
+def area_page(request: Request, key: str, user=Depends(require_internal)):
+    area = domain.DOC_AREAS.get(key)
+    if not area:
+        raise HTTPException(404, "Alan bulunamadı")
+    types = area["types"]
+    docs = db.rows(f"SELECT d.*, (SELECT GROUP_CONCAT(p.code, ', ') FROM document_links l JOIN projects p ON p.id = l.project_id "
+                   f"WHERE l.document_id = d.id) AS codes FROM documents d WHERE doc_type IN ({','.join('?' * len(types))}) "
+                   "ORDER BY COALESCE(doc_date, substr(uploaded_at, 1, 10)) DESC, id DESC", tuple(types))
+    insights = db.rows("SELECT * FROM ai_insights WHERE kind = ? ORDER BY id DESC LIMIT 10", (f"area:{key}",))
+    running = db.scalar("SELECT 1 FROM jobs WHERE kind = 'area' AND ref_id = ? AND status IN ('sirada', 'calisiyor')",
+                        (list(domain.DOC_AREAS).index(key),))
+    return render(request, "area.html", user, key=key, area=area, docs=docs, insights=insights, running=running,
+                  area_idx=list(domain.DOC_AREAS).index(key),
+                  status_labels=STATUS, processing=any(d["status"] in ("sirada", "isleniyor") for d in docs))
+
+
+@router.post("/alan/{key}/analiz")
+def area_analyze(request: Request, key: str, user=Depends(require_internal)):
+    if key not in domain.DOC_AREAS:
+        raise HTTPException(404, "Alan bulunamadı")
+    pipeline.enqueue("area", list(domain.DOC_AREAS).index(key))
+    flash(request, "Analiz başladı; tüm dokümanlar birlikte değerlendiriliyor. Sayfa hazır olunca yenilenecek.")
+    return redirect(f"/alan/{key}")
+
+
+# ------------------------------------------------------------------ AI Security > Copilot kullanımı
+
+@router.get("/guvenlik/copilot", response_class=HTMLResponse)
+def copilot_page(request: Request, ds: str = "", user=Depends(require_internal)):
+    sets = copilot.datasets()
+    current = next((d for d in sets if str(d["id"]) == ds), None) or next((d for d in sets if d["kind"] == "user"), None) \
+        or (sets[0] if sets else None)
+    analysis = copilot.analyze(current["id"]) if current else None
+    trend = copilot.trend()
+    trend_chart = Markup(line_chart([(t["period"], t["adoption"]) for t in trend], "%", height=160)) if len(trend) > 1 else None
+    insight = db.row("SELECT * FROM ai_insights WHERE kind = 'copilot' ORDER BY id DESC LIMIT 1")
+    running = db.scalar("SELECT 1 FROM jobs WHERE kind = 'copilot' AND status IN ('sirada', 'calisiyor')")
+    return render(request, "copilot.html", user, sets=sets, current=current, a=analysis, trend=trend, trend_chart=trend_chart,
+                  columns=json.loads(current["columns"]) if current else [], roles=copilot.ROLES, insight=insight, running=running,
+                  sample=copilot.rows_of(current["id"])[:5] if current else [])
+
+
+@router.post("/guvenlik/copilot/yukle")
+def copilot_upload(request: Request, file: UploadFile = File(...), period: str = Form(""), user=Depends(require_internal)):
+    try:
+        stored = save_stream(_file_chunks(file), file.filename or "copilot.xlsx")
+    except UploadError as exc:
+        flash(request, str(exc), "error")
+        return redirect("/guvenlik/copilot")
+    if stored["ext"] not in (".xlsx", ".xlsm", ".csv"):
+        flash(request, "Copilot raporu için .xlsx ya da .csv yükleyin.", "error")
+        return redirect("/guvenlik/copilot")
+    dup = db.row("SELECT id FROM documents WHERE sha256 = ? AND doc_type = 'copilot'", (stored["sha256"],))
+    if dup:
+        flash(request, "Bu dosya zaten yüklenmiş.", "warn")
+        return redirect("/guvenlik/copilot")
+    did = db.insert("documents", {"title": (file.filename or "Copilot").rsplit(".", 1)[0][:200], "filename": file.filename,
+                                  "storage_path": stored["storage_path"], "sha256": stored["sha256"], "size": stored["size"],
+                                  "doc_type": "copilot", "type_source": "kullanici", "source": "Dijital Dönüşüm",
+                                  "doc_date": (period + "-01") if re.fullmatch(r"\d{4}-\d{2}", period or "") else None,
+                                  "status": "islendi", "ai_mode": "live", "processed_at": db.now(),
+                                  "summary": "Copilot kullanım raporu — AI Security > Copilot Kullanımı sayfasında analiz edilir.",
+                                  "uploaded_by": user["id"], "uploaded_at": db.now()})
+    ids = copilot.import_document(did)
+    if not ids:
+        flash(request, "Dosyada okunabilir bir tablo bulunamadı. İlk satırlarda sütun başlıkları olduğundan emin olun.", "error")
+        return redirect("/guvenlik/copilot")
+    if re.fullmatch(r"\d{4}-\d{2}", period or ""):
+        for i in ids:
+            db.update("copilot_datasets", i, {"period": period})
+    flash(request, f"{sum(db.scalar('SELECT row_count FROM copilot_datasets WHERE id = ?', (i,)) for i in ids)} satır içe aktarıldı. "
+                   "Sütunların doğru tanındığını aşağıdan kontrol edin.")
+    return redirect(f"/guvenlik/copilot?ds={ids[0]}#sutunlar")
+
+
+@router.post("/guvenlik/copilot/{dsid}/sutunlar")
+async def copilot_columns(request: Request, dsid: int, user=Depends(require_internal)):
+    form = await request.form()
+    roles = {k[5:]: v for k, v in form.items() if k.startswith("role_")}
+    copilot.set_columns(dsid, roles)
+    per = str(form.get("period") or "")
+    if re.fullmatch(r"\d{4}-\d{2}", per):
+        db.update("copilot_datasets", dsid, {"period": per})
+    flash(request, "Sütun eşlemesi kaydedildi.")
+    return redirect(f"/guvenlik/copilot?ds={dsid}")
+
+
+@router.post("/guvenlik/copilot/{dsid}/sil")
+def copilot_delete(request: Request, dsid: int, user=Depends(require_internal)):
+    ds = db.row("SELECT * FROM copilot_datasets WHERE id = ?", (dsid,))
+    if ds:
+        db.execute("DELETE FROM copilot_datasets WHERE id = ?", (dsid,))
+        if ds["document_id"] and not db.scalar("SELECT 1 FROM copilot_datasets WHERE document_id = ?", (ds["document_id"],)):
+            d = db.row("SELECT * FROM documents WHERE id = ?", (ds["document_id"],))
+            db.execute("DELETE FROM documents WHERE id = ?", (ds["document_id"],))
+            path = path_of(d["storage_path"]) if d else None
+            if path and not db.scalar("SELECT 1 FROM documents WHERE sha256 = ?", (d["sha256"],)):
+                path.unlink(missing_ok=True)
+        flash(request, "Veri seti silindi.")
+    return redirect("/guvenlik/copilot")
+
+
+@router.post("/guvenlik/copilot/analiz")
+def copilot_analyze(request: Request, user=Depends(require_internal)):
+    pipeline.enqueue("copilot")
+    flash(request, "Copilot analizi başladı. AI'a yalnızca toplamlar gönderilir; ad ve e-postalar gönderilmez.")
+    return redirect("/guvenlik/copilot")

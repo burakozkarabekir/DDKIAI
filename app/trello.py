@@ -5,7 +5,8 @@ Trello'da: Pano menüsü → Yazdır, dışa aktar ve paylaş → JSON olarak d�
 Aktarılanlar
 - Kart adı: "UC88-YP Lojistik-Spare Parts Demand Forecasting" → kod UC88, birim "YP Lojistik", ad "Spare Parts…"
   "UC32 & UC43-…" → kod UC32, diğer adlara UC43 · "… Faz2" → kod UC57-F2 · kodsuz kartlar → PRJ-001…
-- Birim: departmana eşlenir (önizlemede seçilir) ya da marka ise (VW Binek, Audi, Scania…) marka alanına yazılır
+- Birim: departmana eşlenir (önizlemede seçilir); marka ise (VW Binek, Audi, Scania…) projeye marka olarak eklenir ve
+  departmanı markanın departmanından gelir. Birim olmasa da kart adında marka geçiyorsa (ör. "DOD Araç Karşılaştırma") marka eklenir
 - Liste → aşama (önizlemede seçilir; "Aktarma" seçilen listeler atlanır)
 - Liste değişiklikleri → aşama tarihçesi; ilk "devam eden" listeye giriş → başlangıç, "tamamlandı" listesine giriş → canlıya geçiş
   (Trello'da hareket kaydı olmayan kartların başlangıç tarihi boş kalır; uydurulmaz.)
@@ -17,7 +18,8 @@ import json
 import re
 from datetime import datetime, timezone
 
-from . import db
+from . import db, org
+from .domain import match_brands
 from .knowledge import norm
 
 SKIP = "atla"
@@ -37,17 +39,14 @@ _STAGE_HINTS = [
 
 # Birim adı → varsayılan departman (Ayarlar'daki adlarla). Bulunamayan birim için yeni departman önerilir.
 _DEPT_SYNONYMS = {
-    "yp lojistik": "Yedek Parça & Lojistik", "yedek parca": "Yedek Parça & Lojistik", "lojistik": "Yedek Parça & Lojistik",
-    "ik": "İnsan Kaynakları", "insan kaynaklari": "İnsan Kaynakları",
-    "hukuk": "Hukuk & Uyum", "uyum": "Hukuk & Uyum",
-    "ssh": "Satış Sonrası Hizmetler", "satis sonrasi": "Satış Sonrası Hizmetler",
-    "dim": "Müşteri Deneyimi & CRM", "crm": "Müşteri Deneyimi & CRM",
-    "mali isler": "Finans", "finans": "Finans", "muhasebe": "Finans",
-    "pazarlama": "Pazarlama", "satin alma": "Satın Alma", "satis": "Satış",
-    "filo": "Filo Kiralama", "bt": "Bilgi Teknolojileri & Güvenlik",
+    "yp lojistik": "Yedek Parça ve Lojistik", "yedek parca": "Yedek Parça ve Lojistik", "lojistik": "Yedek Parça ve Lojistik",
+    "mali isler": "Mali İşler", "finans": "Mali İşler", "muhasebe": "Mali İşler",
+    "kurumsal iletisim": "Dijital Dönüşüm ve Kurumsal İletişim", "dijital donusum": "Dijital Dönüşüm ve Kurumsal İletişim",
+    "hukuk": "Hukuk", "uyum": "Hukuk",
+    "ik": "İnsan Kaynakları ve Süreç Yönetimi", "insan kaynaklari": "İnsan Kaynakları ve Süreç Yönetimi",
+    "surec yonetimi": "İnsan Kaynakları ve Süreç Yönetimi",
+    "ic denetim": "İç Denetim", "denetim": "İç Denetim",
 }
-_BRANDS = {"vw binek", "vw ticari", "volkswagen", "seat&cupra", "seat & cupra", "seat", "cupra", "audi", "porsche", "scania",
-           "skoda", "bentley", "lamborghini", "man", "dod", "dogus oto", "vw"}
 
 _CODE_RE = re.compile(r"^\s*(UC)\s*0*(\d+)((?:\s*&\s*UC\s*\d+)*)\s*[-–:]?\s*(.*)$", re.I | re.S)
 
@@ -104,8 +103,8 @@ def classify_unit(unit: str | None, departments: dict[str, int]) -> tuple[str, s
     if not unit:
         return "none", None
     n = norm(unit)
-    if n in _BRANDS or any(n.startswith(b + " ") for b in _BRANDS):
-        return "brand", None
+    if match_brands(unit):
+        return "brand", ", ".join(match_brands(unit))
     for key, dept in _DEPT_SYNONYMS.items():
         if n == key or n.startswith(key + " "):
             return "dept", dept
@@ -189,7 +188,7 @@ def import_board(raw: str, stage_map: dict[str, str], unit_map: dict[str, str], 
         """Dönüş: (departman_id, birim_marka_mı)"""
         if not unit:
             return None, False
-        choice = unit_map.get(unit, "")
+        choice = unit_map.get(unit, "marka" if match_brands(unit) else "")
         if choice == "marka":
             return None, True
         if choice == "yeni":
@@ -244,7 +243,7 @@ def import_board(raw: str, stage_map: dict[str, str], unit_map: dict[str, str], 
             "aliases": ", ".join(dict.fromkeys(a for a in aliases if a)) or None,
             "summary": (re.split(r"(?<=[.!?])\s", desc, maxsplit=1)[0][:400] if desc else None),
             "solution": desc[:8000] or None,
-            "business_unit": p["unit"], "brands": p["unit"] if is_brand else None,
+            "business_unit": p["unit"],
             "department_id": unit_dept, "stage": stage, "owner": owner or None,
             "start_date": start, "target_date": due, "golive_date": golive,
             "tags": ", ".join(tags) or None,
@@ -257,7 +256,7 @@ def import_board(raw: str, stage_map: dict[str, str], unit_map: dict[str, str], 
                 continue
             # Elle girilmiş alanları ezme: yalnızca Trello'nun sahibi olduğu alanları güncelle
             upd = {k: v for k, v in fields.items() if k in ("name", "stage", "target_date", "tags", "owner") and v is not None}
-            for k in ("start_date", "golive_date", "department_id", "brands", "business_unit", "solution", "summary", "aliases"):
+            for k in ("start_date", "golive_date", "department_id", "business_unit", "solution", "summary", "aliases"):
                 if fields[k] and not existing.get(k):
                     upd[k] = fields[k]
             if upd.get("stage") and upd["stage"] != existing["stage"]:
@@ -293,6 +292,9 @@ def import_board(raw: str, stage_map: dict[str, str], unit_map: dict[str, str], 
             if not card_moves and stage != "fikir":
                 db.insert("stage_history", {"project_id": pid, "from_stage": "fikir", "to_stage": stage,
                                             "note": f"Trello listesi: {lst['name']}", "user_id": user_id, "at": ts_now})
+        brand_ids = org.brand_ids_from_text(p["unit"] if is_brand else card["name"])
+        if brand_ids and (not existing or not org.project_brand_ids(pid)):
+            org.set_project_brands(pid, brand_ids)
         stats["comments"] += _import_comments(pid, card, comments.get(card["id"], []), user_id)
         stats["actions"] += _import_checklists(pid, card, checklists, user_id)
     db.log(user_id, "trello_import", detail=json.dumps(stats, ensure_ascii=False))

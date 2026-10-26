@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import health, comments_block, upload_form %}
+{% from "partials/macros.html" import health, comments_block, upload_form, security_tabs %}
 {% block title %}{{ i.name }}{% endblock %}
 {% block crumbs %}<a href="/guvenlik">AI Security</a> / {{ i.name }}{% endblock %}
 {% block content %}
+{{ security_tabs('girisim') }}
 <div class="page-head"><div>
   <div class="row" style="margin-bottom:6px"><span class="badge">{{ 'Platform' if i.category == 'platform' else 'Güvenlik' }}</span>{{ health(i.health) }}</div>
   <h1>{{ i.name }}</h1><p>{{ i.description }}</p>

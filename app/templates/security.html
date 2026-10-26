@@ -1,49 +1,33 @@
 {% extends "base.html" %}
-{% from "partials/macros.html" import health %}
-{% block title %}AI Security{% if table %}
-<div class="card" id="veriler" style="margin-top:16px">
-  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
-  <div class="table-wrap" style="border:0"><table>
-    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
-    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
-      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
-      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
-        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
-  </table></div>
-</div>
-{% endif %}
-{% endblock %}
-{% block crumbs %}AI kullanım ve güvenlik metrikleri · son dönem {{ (periods[-1]|period) if periods else '—' }}{% if table %}
-<div class="card" id="veriler" style="margin-top:16px">
-  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
-  <div class="table-wrap" style="border:0"><table>
-    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
-    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
-      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
-      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
-        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
-  </table></div>
-</div>
-{% endif %}
-{% endblock %}
-{% block topactions %}<a class="btn" href="/guvenlik/sablon.csv">CSV şablonu</a>{% if table %}
-<div class="card" id="veriler" style="margin-top:16px">
-  <div class="card-head"><h2>Kayıtlı veriler</h2><span class="muted small">Düzenlemek için dönemi seçin; silmek dönemin tüm metriklerini kaldırır.</span></div>
-  <div class="table-wrap" style="border:0"><table>
-    <thead><tr><th>Dönem</th>{% for key, m in metrics.items() %}<th class="num" title="{{ m.label }}">{{ m.label|truncate(18) }}</th>{% endfor %}<th></th></tr></thead>
-    <tbody>{% for per, vals in table.items() %}<tr><td class="nowrap"><b>{{ per|period }}</b></td>
-      {% for key in metrics %}<td class="num small">{{ vals[key]|num if key in vals else '—' }}</td>{% endfor %}
-      <td class="nowrap">{% if user.role in D.CAN_EDIT %}<a class="btn sm" href="/guvenlik?donem={{ per }}#giris">Düzenle</a>
-        <form method="post" action="/guvenlik/metrik/sil" style="display:inline" data-confirm="{{ per }} dönemine ait tüm metrikler silinsin mi?"><input type="hidden" name="period" value="{{ per }}"><button class="btn ghost sm danger">Sil</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
-  </table></div>
-</div>
-{% endif %}
-{% endblock %}
+{% from "partials/macros.html" import health, security_tabs %}
+{% block title %}AI Security{% endblock %}
+{% block crumbs %}AI kullanım ve güvenlik metrikleri · son dönem {{ (periods[-1]|period) if periods else '—' }}{% endblock %}
+{% block topactions %}<a class="btn" href="/guvenlik/sablon.csv">CSV şablonu</a>{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>AI Security</h1>
-<p>Kurumsal AI kullanımı (AI Studio), onaysız AI kullanımı (Shadow AI), veri koruma ve farkındalık. Hedef: güvenli kanalın büyümesi, gölge kullanımın küçülmesi.</p></div></div>
+<p>Kurumsal AI kullanımı (AI Studio, Copilot), onaysız AI kullanımı (Shadow AI), veri koruma ve farkındalık. Hedef: güvenli kanalın büyümesi, gölge kullanımın küçülmesi.</p></div></div>
+{{ security_tabs('genel') }}
 
-<h2>Girişimler</h2>
+<div class="grid g3" style="margin-bottom:22px">
+  <a class="card glow tile-link" href="/guvenlik/copilot">
+    <div class="small muted">Microsoft 365 Copilot benimseme</div>
+    {% if copilot %}<div class="row" style="align-items:baseline"><span class="value big">%{{ copilot.adoption|num }}</span><span class="spacer"></span>
+      {% if copilot.delta is not none %}<span class="delta {{ 'good' if copilot.delta > 0 else 'bad' if copilot.delta < 0 else 'flat' }}">{{ '▲' if copilot.delta > 0 else '▼' if copilot.delta < 0 else '■' }} {{ copilot.delta|abs }} puan</span>{% endif %}</div>
+      <div class="small muted">{{ copilot.active }} / {{ copilot.total }} lisanslı kullanıcı son 28 günde aktif · {{ copilot.period or '' }}</div>
+    {% else %}<div class="value big muted">—</div><div class="small muted">{{ 'Veri seti var, kişi bazlı rapor bekleniyor' if copilot_sets else 'Copilot kullanım Excel\'ini yükleyin' }} →</div>{% endif %}
+  </a>
+  <a class="card tile-link" href="/alan/ai-yonetisimi">
+    <div class="small muted">AI yönetişimi</div><div class="value big">⚖︎</div>
+    <div class="small muted">Politika, standart ve risk dokümanları · AI ile boşluk analizi →</div>
+  </a>
+  <a class="card tile-link" href="#girisimler">
+    <div class="small muted">Girişimler</div><div class="value big">{{ initiatives|length }}</div>
+    <div class="small muted">AI Studio, Shadow AI ve diğer güvenlik girişimleri →</div>
+  </a>
+</div>
+
+<h2 id="girisimler">Girişimler</h2>
+{% if not initiatives %}<p class="muted small">Henüz girişim yok. Aşağıdan ekleyebilirsiniz.</p>{% endif %}
 <div class="grid g3" style="margin-bottom:22px">
   {% for i in initiatives %}
   <a class="card pcard {{ i.health }}" href="/guvenlik/{{ i.slug }}" style="margin:0">

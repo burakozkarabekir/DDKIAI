@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import doc_type, doc_status, security_tabs %}
+{% block title %}{{ area.title }}{% endblock %}
+{% block crumbs %}{{ docs|length }} doküman{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{{ area.title }}</h1><p>{{ area.intro }}</p></div>
+  <form method="post" action="/alan/{{ key }}/analiz"><button class="btn primary" {{ 'disabled' if not docs }} data-busy="Analiz kuyruğa alınıyor…">✦ Bu alanı AI ile analiz et</button></form></div>
+{% if key == 'ai-yonetisimi' %}{{ security_tabs('yonetisim') }}{% endif %}
+
+<div class="grid g-main">
+  <div class="stack">
+    <div class="card ai-card" {% if running %}data-poll-job="area/{{ area_idx }}"{% endif %}>
+      {% set latest = insights[0] if insights else none %}
+      <div class="card-head"><h2>AI analizi</h2>{% if latest %}<span class="small muted">{{ latest.created_at|ago }}</span>{% endif %}</div>
+      {% if running %}<p class="muted">Analiz hazırlanıyor… Bu sayfayı birkaç dakika sonra yenileyin.</p>
+      {% elif latest %}<div class="prose">{{ latest.body|md }}</div>
+      {% else %}<p class="muted">Henüz analiz yok. Doküman yükleyip <b>Bu alanı AI ile analiz et</b>'e basın; AI bu alandaki tüm dokümanları portföy verisiyle birlikte değerlendirir.</p>{% endif %}
+    </div>
+    <div class="table-wrap" {% if processing %}data-poll-docs="{{ docs|selectattr('status','in',['sirada','isleniyor'])|map(attribute='id')|join(',') }}"{% endif %}>
+      <table>
+        <thead><tr><th>Doküman</th><th>Tür</th><th>Tarih</th><th>İlgili projeler</th><th>Durum</th></tr></thead>
+        <tbody>{% for d in docs %}
+        <tr><td><a href="/dokumanlar/{{ d.id }}"><b>{{ d.title }}</b></a>{% if d.summary %}<div class="small muted">{{ d.summary|truncate(140) }}</div>{% endif %}</td>
+          <td>{{ doc_type(d.doc_type) }}</td><td class="small nowrap">{{ (d.doc_date or d.uploaded_at)|date }}</td>
+          <td class="small">{{ d.codes or '—' }}</td><td>{{ doc_status(d.status, status_labels) }}</td></tr>
+        {% else %}<tr><td colspan="5" class="empty">Bu alanda henüz doküman yok.</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </div>
+  <div class="stack">
+    <div class="card"><h2>Doküman yükle</h2>
+      <form method="post" action="/dokumanlar" enctype="multipart/form-data" class="upload">
+        <label class="drop"><input type="file" name="files" multiple required><span><b>Dosyaları seçin veya sürükleyin</b><br><span class="small muted">Word, PDF, PowerPoint, Excel · dosya başına en fazla {{ MAX_UPLOAD_MB }} MB</span></span></label>
+        <div class="field" style="margin-top:10px"><label>Tür</label><select name="doc_type">{% for t in area.types %}<option value="{{ t }}" {{ 'selected' if t == area.default }}>{{ D.DOC_TYPES[t][0] }}</option>{% endfor %}</select></div>
+        <div class="field"><label>Doküman tarihi / dönemi</label><input type="date" name="doc_date"></div>
+        <div class="field"><label>Kaynak</label><select name="source">{% for s in D.DOC_SOURCES %}<option {{ 'selected' if s == 'Dijital Dönüşüm' }}>{{ s }}</option>{% endfor %}</select></div>
+        <button class="btn primary" data-busy="Yükleniyor…">Yükle</button>
+      </form>
+    </div>
+    {% if insights|length > 1 %}
+    <div class="card"><h3>Önceki analizler</h3>
+      <ul class="list-plain small">{% for i in insights[1:] %}<li><a href="/danisman/icgoru/{{ i.id }}">{{ i.title }}</a> <span class="muted">· {{ i.created_at|date }}</span></li>{% endfor %}</ul></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

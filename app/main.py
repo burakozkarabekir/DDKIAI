@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, db, pipeline, seed
+from . import config, db, org, pipeline, seed
 from .auth import LoginRequired, current_user
 from .routes import documents, misc, projects
 from .web import APP_DIR, md, parse_float, redirect, templates
@@ -20,9 +20,8 @@ _md, _f = md, parse_float
 async def lifespan(_app):
     db.init_db()
     seed.ensure_users()
-    seed.ensure_departments()
-    if config.SEED_DEMO:
-        seed.seed_demo()
+    seed.purge_legacy_demo()
+    org.ensure_org()
     pipeline.start_worker()
     yield
 
