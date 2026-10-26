@@ -258,9 +258,12 @@ def test_legacy_demo_purge_and_department_migration():
     db.insert("projects", {"code": code, "name": name, "stage": "fikir", "created_at": ts, "updated_at": ts})
     old = db.insert("departments", {"name": "Finans", "sort": 99, "active": 1})
     db.execute("UPDATE projects SET department_id = ? WHERE id = ?", (old, keep))
+    demo_user = db.insert("users", {"email": "dt@demo.local", "name": "DT", "role": "dt", "password_hash": "x", "created_at": ts})
+    db.log(demo_user, "eski_kayit")  # başka tabloda adı geçen demo kullanıcısı silinemez, pasif yapılır
     db.set_setting("demo_purged_v3", "")
     db.set_setting("org_v3", "")
     seed.purge_legacy_demo()
+    assert db.scalar("SELECT active FROM users WHERE id = ?", (demo_user,)) == 0
     org.ensure_org()
     assert not db.scalar("SELECT 1 FROM projects WHERE code = ? AND name = ?", (code, name))
     p = db.row("SELECT * FROM projects WHERE id = ?", (keep,))

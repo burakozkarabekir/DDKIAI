@@ -5,6 +5,7 @@ aktarımından ve elle girdiğiniz kayıtlardan gelen veriler görünür. Eski s
 ilk açılışta otomatik silinir (purge_legacy_demo).
 """
 import os
+import sqlite3
 
 from . import db
 from .auth import TEAM_EMAIL, hash_password
@@ -32,8 +33,6 @@ def purge_legacy_demo(user_id: int | None = None) -> dict | None:
     if db.setting("demo_purged_v3") == "1":
         return None
     stats = clear_demo(user_id)
-    db.execute("DELETE FROM users WHERE email LIKE '%@demo.local' AND role != 'admin' "
-               "AND id NOT IN (SELECT user_id FROM comments)")
     db.set_setting("demo_purged_v3", "1")
     return stats
 
@@ -76,10 +75,10 @@ def clear_demo(user_id: int | None = None) -> dict:
     db.execute("DELETE FROM ai_insights WHERE project_id IS NULL OR project_id NOT IN (SELECT id FROM projects)")
     db.execute("DELETE FROM jobs WHERE status IN ('tamam', 'hata')")
     for uid in [r["id"] for r in db.rows("SELECT id FROM users WHERE email LIKE '%@demo.local' AND role != 'admin'")]:
-        if db.scalar("SELECT 1 FROM comments WHERE user_id = ?", (uid,)):
-            db.execute("UPDATE users SET active = 0 WHERE id = ?", (uid,))
-        else:
+        try:
             db.execute("DELETE FROM users WHERE id = ?", (uid,))
+        except sqlite3.IntegrityError:  # tarihçe, yorum, doküman vb. kayıtlarda adı geçiyor: silmek yerine pasif yap
+            db.execute("UPDATE users SET active = 0 WHERE id = ?", (uid,))
     for name, pain in DEMO_PAIN_POINTS.items():
         db.execute("UPDATE departments SET pain_points = NULL WHERE name = ? AND pain_points = ?", (name, pain))
     # demo sürümünün varsayılan departmanlarından boş kalanlar

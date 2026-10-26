@@ -1,4 +1,5 @@
 """AI Impact Merkezi — FastAPI uygulaması (giriş noktası)."""
+import logging
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -16,12 +17,18 @@ from .web import APP_DIR, md, parse_float, redirect, templates
 _md, _f = md, parse_float
 
 
+log = logging.getLogger("aiimpact")
+
+
 @asynccontextmanager
 async def lifespan(_app):
     db.init_db()
     seed.ensure_users()
-    seed.purge_legacy_demo()
-    org.ensure_org()
+    for step in (seed.purge_legacy_demo, org.ensure_org):  # geçiş adımları: hata verse de uygulama açılsın
+        try:
+            step()
+        except Exception:
+            log.exception("Başlangıç adımı başarısız: %s", step.__name__)
     pipeline.start_worker()
     yield
 
