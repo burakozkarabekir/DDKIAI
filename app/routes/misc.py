@@ -7,6 +7,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 from markupsafe import Markup
 
 from .. import ai, charts, config, copilot, db, domain, org, pipeline, security, seed, storage, trello
@@ -74,7 +75,7 @@ async def advisor_ask(request: Request, user=Depends(require_internal)):
         pid = None
     page = str(payload.get("page") or "")[:200]
     try:
-        answer, _hits = ai.advisor_answer(history, question, project_id=pid, page=page)
+        answer, _hits = await run_in_threadpool(ai.advisor_answer, history, question, project_id=pid, page=page)
     except Exception as exc:
         return JSONResponse({"error": f"AI yanıt veremedi: {exc}"}, status_code=502)
     ts = db.now()

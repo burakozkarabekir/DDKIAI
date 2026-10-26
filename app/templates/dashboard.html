@@ -25,17 +25,11 @@
       <h1>Yapay zekâ portföyü <span class="grad">tek ekranda</span></h1>
       <p>{% if projects %}{{ active|length }} aktif proje, {{ matrix|selectattr('total')|list|length }} departman, {{ brand_counts|length }} marka. Nerede olduğumuz, nerede takıldığımız ve ne kadar değer ürettiğimiz.{% else %}Henüz proje yok. Trello'dan içe aktarın, proje ekleyin ya da DT raporlarını yükleyin — ekran kendiliğinden dolacak.{% endif %}</p>
     </div>
-    <div class="hero-side">
-      <div class="ring" style="--p:{{ measured_pct|round|int }}" data-tip="Canlı projelerde etki ölçümü">
-        <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" cx="60" cy="60" r="52" pathLength="100"/></svg>
-        <div><b>{{ counter(measured_pct|round|int, '%') }}</b><span>ölçülüyor</span></div>
-      </div>
-    </div>
   </div>
   {% if projects %}
   <div class="hero-kpis">
     <a class="hk" href="/projeler"><span>Aktif proje</span><b>{{ counter(active|length) }}</b><em>{{ projects|length }} kayıt · {{ stage_counts[0][2] }} fikir</em></a>
-    <a class="hk" href="/projeler?view=liste&stage=canli"><span>Canlıda / ölçekleniyor</span><b>{{ counter(live|length) }}</b><em>{{ measured|length }} tanesi ölçülüyor</em></a>
+    <a class="hk" href="/projeler?view=liste&stage=canli"><span>Canlıda / ölçekleniyor</span><b>{{ counter(live|length) }}</b><em>{{ measured|length }} tanesinde etki ölçülüyor (%{{ measured_pct|round|int }})</em></a>
     <a class="hk" href="/projeler?view=liste"><span>Gerçekleşen yıllık etki</span><b>{{ money_counter(value.realized) }}</b><em>hedefin %{{ realized_pct|round|int }}'i</em></a>
     <a class="hk {{ 'alert' if health_counts['kirmizi'] }}" href="#riskler"><span>Dikkat gerektiren</span><b>{{ counter(risky_n) }}</b><em>{{ health_counts['kirmizi'] }} riskli · {{ health_counts['sari'] }} dikkat</em></a>
     <a class="hk" href="/guvenlik/copilot"><span>Copilot benimseme</span><b>{% if copilot %}{{ counter(copilot.adoption, '%') }}{% else %}—{% endif %}</b><em>{% if copilot %}{{ copilot.active }}/{{ copilot.total }} aktif kullanıcı{% else %}Excel yükleyin{% endif %}</em></a>

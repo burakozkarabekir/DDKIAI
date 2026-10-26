@@ -50,6 +50,8 @@ async def security_headers(request: Request, call_next):
         if origin and urlparse(origin).netloc != request.headers.get("host"):
             return PlainTextResponse("Geçersiz istek kaynağı", status_code=403)
     response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"  # güncellemeden sonra tarayıcı eski CSS/JS'i kullanmasın
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"

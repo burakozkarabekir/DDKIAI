@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{% endblock %} · {{ APP_NAME }}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/app.css?v={{ VERSION }}">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Ctext x='16' y='21' font-size='13' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'%3EAI%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -54,15 +54,31 @@
   </main>
 </div>
 {% if internal and not path.startswith('/danisman') %}
-<div class="fab-chat" id="fab-chat" data-page="{{ path }}">
-  <button class="fab-btn" type="button" data-fab-toggle aria-label="AI Danışman ile konuş">{{ icon('spark') }}<span>AI'a sor</span></button>
-  <section class="fab-panel" aria-label="AI Danışman" hidden>
-    <header><div class="fab-title">{{ icon('spark') }}<div><b>AI Danışman</b><small data-fab-ctx>Portföy, dokümanlar ve metrikler üzerinden yanıtlar</small></div></div>
-      <div class="row"><a class="fab-ico" href="/danisman" title="Tam ekran">{{ icon('expand') }}</a><button class="fab-ico" type="button" data-fab-clear title="Sohbeti temizle">⟲</button><button class="fab-ico" type="button" data-fab-toggle title="Kapat">{{ icon('close') }}</button></div></header>
-    <div class="fab-log" data-fab-log><div class="fab-empty">Merhaba! Projeler, DT raporları, yönetici özetleri veya Copilot metrikleri hakkında soru sorabilirsiniz.<div class="fab-sugg" data-fab-sugg></div></div></div>
-    <form class="fab-form" data-fab-form><textarea rows="1" placeholder="Sorunuzu yazın…" required></textarea><button class="fab-send" aria-label="Gönder">{{ icon('send') }}</button></form>
+<div class="cb" id="chatbot" data-page="{{ path }}">
+  <section class="cb-win" role="dialog" aria-label="AI Asistan" hidden>
+    <header class="cb-head">
+      <div class="cb-av">{{ icon('spark') }}</div>
+      <div class="cb-who"><b>AI Asistan</b><span><i class="cb-dot {{ 'live' if ai_live() }}"></i>{{ 'Çevrimiçi' if ai_live() else 'Demo modu · AI bağlı değil' }}</span></div>
+      <div class="cb-tools">
+        <button type="button" data-cb-new title="Yeni sohbet" aria-label="Yeni sohbet">{{ icon('newchat') }}</button>
+        <a href="/danisman" title="Tam ekran aç" aria-label="Tam ekran aç">{{ icon('expand') }}</a>
+        <button type="button" data-cb-close title="Küçült" aria-label="Küçült">{{ icon('minus') }}</button>
+      </div>
+    </header>
+    <div class="cb-ctx" data-cb-ctx hidden></div>
+    <div class="cb-body" data-cb-log aria-live="polite"></div>
+    <form class="cb-input" data-cb-form>
+      <textarea rows="1" placeholder="Mesajınızı yazın…" aria-label="Mesaj"></textarea>
+      <button class="cb-send" type="submit" aria-label="Gönder">{{ icon('send') }}</button>
+    </form>
+    <div class="cb-foot">Yanıtlar portföy, doküman ve metrik verilerine dayanır · Enter gönderir</div>
   </section>
-</div>{% endif %}
-<script src="/static/js/app.js"></script>
+  <button class="cb-launch" type="button" data-cb-toggle aria-label="AI Asistan ile konuş" aria-expanded="false" title="AI Asistan">
+    <span class="cb-ic-open">{{ icon('chat') }}</span><span class="cb-ic-close">{{ icon('close') }}</span>
+  </button>
+</div>
+<script src="/static/js/chat.js?v={{ VERSION }}"></script>
+{% endif %}
+<script src="/static/js/app.js?v={{ VERSION }}"></script>
 </body>
 </html>

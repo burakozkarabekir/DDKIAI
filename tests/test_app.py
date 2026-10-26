@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
@@ -201,8 +202,10 @@ def test_synthesis_and_advisor_with_page_context(client):
     assert r.status_code == 200 and r.json()["answer_html"]
     hist = client.get("/api/danisman/gecmis").json()["messages"]
     assert hist[-2]["text"] == "Riskli projeler hangileri?" and hist[-1]["html"]
-    assert "sohbet balonu" not in client.get("/danisman").text and "fab-chat" not in client.get("/danisman").text
-    assert "fab-chat" in client.get("/").text
+    assert 'id="chatbot"' not in client.get("/danisman").text  # tam ekran danışmanda pencere tekrar açılmaz
+    home = client.get("/")
+    assert 'id="chatbot"' in home.text and "/static/js/chat.js?v=" in home.text
+    assert client.get("/static/js/chat.js").headers["cache-control"] == "no-cache"
     assert client.post("/api/danisman/temizle").json()["ok"]
     assert client.get("/api/danisman/gecmis").json()["messages"] == []
 
@@ -576,3 +579,13 @@ def test_deep_probe_finds_right_deployment(client):
     finally:
         config.AI_API_KEY, config.AI_MODEL = old
         srv.shutdown()
+
+
+def test_stylesheet_braces_balanced():
+    """Bozuk bir kural sonrasındaki tüm stilleri geçersiz kılar (ör. sohbet penceresi stilsiz görünür)."""
+    css = (Path(__file__).resolve().parent.parent / "app" / "static" / "css" / "app.css").read_text(encoding="utf-8")
+    depth = 0
+    for ch in css:
+        depth += (ch == "{") - (ch == "}")
+        assert depth >= 0
+    assert depth == 0
