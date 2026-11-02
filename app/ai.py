@@ -10,6 +10,7 @@ Görevler
 Uç nokta tanımlı değilse (AI_PROVIDER=mock) kural tabanlı çıktılar üretilir.
 """
 import json
+import logging
 import re
 import time
 from datetime import date, datetime, timedelta
@@ -30,6 +31,9 @@ Kurallar:
 - Farklı kaynaklar çelişiyorsa bunu açıkça belirt (ör. DT raporu ile PDD'deki hedef tarih farklı).
 - Ölçümlemesi olmayan canlı projeleri işaretle: ölçülmeyen etki, etki değildir.
 """
+
+
+log = logging.getLogger("aiimpact")
 
 
 class AIError(Exception):
@@ -184,14 +188,18 @@ def _chat(client: httpx.Client, headers: dict, system: str, messages: list[dict]
     _raise(r)
     choice = r.json()["choices"][0]
     content = (choice.get("message") or {}).get("content") or ""
-    if not content and choice.get("finish_reason") == "length":
-        # akıl yürüten modeller sınırın tamamını düşünmeye harcayabilir: daha geniş sınırla bir kez daha
+    if choice.get("finish_reason") == "length":
+        # yanıt token sınırında kesildi (akıl yürüten modeller sınırın bir kısmını düşünmeye harcar): daha geniş sınırla bir kez daha
         key = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
-        body[key] = max(body[key] * 4, 4000)
+        body[key] = _wider(body[key])
         r = client.post(url, headers=headers, json=body)
         _raise(r)
-        content = r.json()["choices"][0]["message"].get("content") or ""
+        content = (r.json()["choices"][0].get("message") or {}).get("content") or ""
     return content
+
+
+def _wider(limit: int) -> int:
+    return min(max(limit * 3, 4000), 64000)
 
 
 def _responses_text(data: dict) -> str:
@@ -219,8 +227,8 @@ def _responses(client: httpx.Client, headers: dict, system: str, messages: list[
     _raise(r)
     data = r.json()
     text = _responses_text(data)
-    if not text and data.get("status") == "incomplete":
-        body["max_output_tokens"] = max(max_tokens * 4, 4000)
+    if data.get("status") == "incomplete":  # token sınırında kesildi: daha geniş sınırla bir kez daha
+        body["max_output_tokens"] = _wider(body["max_output_tokens"])
         r = client.post(url, headers=headers, json=body)
         _raise(r)
         data = r.json()
@@ -238,15 +246,66 @@ def _raise(r: httpx.Response) -> None:
         raise exc
 
 
-def parse_json(text: str) -> dict:
-    text = text.strip()
+class TruncatedJSON(AIError):
+    """Yanıt yarım kalmış; onarılmış (eksik) sonuç .partial içinde."""
+
+    def __init__(self, partial: dict):
+        super().__init__("AI yanıtı yarım kalmış (token sınırı)")
+        self.partial = partial
+
+
+def _close_truncated(s: str):
+    """Yarım kalmış JSON'u son tamamlanan öğeden keserek kapatır; olmazsa None."""
+    stack, in_str, esc, cuts = [], False, False, []
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack:
+                break
+            stack.pop()
+            if stack:
+                cuts.append((i + 1, "".join(reversed(stack))))
+    for end, closers in reversed(cuts[-400:]):
+        try:
+            return json.loads(s[:end] + closers, strict=False)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_json(text: str, allow_partial: bool = True) -> dict:
+    """Model yanıtından JSON nesnesini alır. Yanıt token sınırında kesildiyse tamamlanan kısmı kurtarır
+    (allow_partial=False ise TruncatedJSON fırlatır, çağıran parçayı küçültüp yeniden deneyebilir)."""
+    text = (text or "").strip()
     fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
     if fence:
         text = fence.group(1)
     start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1:
+    if start == -1:
         raise AIError("AI yanıtı JSON içermiyor")
-    return json.loads(text[start:end + 1])
+    if end > start:
+        try:
+            return json.loads(text[start:end + 1], strict=False)
+        except ValueError:
+            pass
+    partial = _close_truncated(text[start:])
+    if not isinstance(partial, dict):
+        raise AIError("AI yanıtı geçerli JSON değil (yanıt yarım kalmış olabilir). Dokümanı yeniden işlemeyi deneyin.")
+    if not allow_partial:
+        raise TruncatedJSON(partial)
+    log.warning("AI yanıtı yarım kalmıştı; tamamlanan kısım kullanıldı.")
+    return partial
 
 
 def request_url(style: str | None = None) -> str:
@@ -489,7 +548,7 @@ Kurallar:
   - Her bilgi için evidence: dokümandan kısa birebir alıntı (en fazla 200 karakter). confidence: 0-1.
   - as_of: bilginin ait olduğu tarih (doküman tarihi ya da metinde geçen tarih), YYYY-MM-DD.
 
-Sadece şu şemada geçerli JSON döndür:
+Sadece şu şemada geçerli JSON döndür (girintisiz, tek satır; uzun dokümanda yanıtı kısa tut):
 {{"doc_type": "tür anahtarı", "doc_date": "YYYY-MM-DD veya null", "summary": "2-4 cümle özet",
  "projects": [{{"code": "AI-003", "confidence": 0.9}}],
  "new_projects": [{{"name": "...", "description": "..."}}],
@@ -518,17 +577,28 @@ def extract_document(doc: dict, text: str) -> dict:
     windows = [text[i:i + budget] for i in range(0, max(len(text), 1), budget)] or [""]
     merged = {"doc_type": None, "doc_date": None, "summary": None, "projects": [], "new_projects": [], "facts": []}
     types = "; ".join(f'"{k}" = {v[0]} ({v[1]})' for k, v in DOC_TYPES.items())
+    fixed = {"types": types, "stages": ", ".join(STAGE_LABELS), "fields": _fields_doc(), "catalog": _catalog_text(),
+             "filename": doc["filename"], "source": doc["source"] or "—", "uploaded": doc["uploaded_at"][:10],
+             "declared": DOC_TYPES[doc["doc_type"]][0] if doc["type_source"] == "kullanici" else "otomatik algıla"}
+
+    def run(window: str, part: str, depth: int = 0) -> list[dict]:
+        prompt = EXTRACT_PROMPT.format(**fixed, part=part, text=window)
+        out = complete([{"role": "user", "content": prompt}], json_mode=True, max_tokens=max(config.AI_MAX_TOKENS, 16000))
+        try:
+            return [parse_json(out, allow_partial=depth >= 2 or len(window) < 3000)]
+        except TruncatedJSON:
+            # yanıt sığmadı: parçayı ikiye bölüp her yarıyı ayrı çıkar (bilgi kaybı olmasın)
+            cut = window.rfind("\n", 0, len(window) // 2 + 500)
+            cut = cut if cut > len(window) // 4 else len(window) // 2
+            return run(window[:cut], f"{part}a", depth + 1) + run(window[cut:], f"{part}b", depth + 1)
+
     for i, window in enumerate(windows[:12], 1):
-        prompt = EXTRACT_PROMPT.format(
-            types=types, stages=", ".join(STAGE_LABELS), fields=_fields_doc(), catalog=_catalog_text(),
-            filename=doc["filename"], declared=DOC_TYPES[doc["doc_type"]][0] if doc["type_source"] == "kullanici" else "otomatik algıla",
-            source=doc["source"] or "—", uploaded=doc["uploaded_at"][:10], part=f"{i}/{len(windows)}", text=window)
-        res = parse_json(complete([{"role": "user", "content": prompt}], json_mode=True, max_tokens=max(config.AI_MAX_TOKENS, 6000)))
-        merged["doc_type"] = merged["doc_type"] or res.get("doc_type")
-        merged["doc_date"] = merged["doc_date"] or res.get("doc_date")
-        merged["summary"] = merged["summary"] or res.get("summary")
-        for key in ("projects", "new_projects", "facts"):
-            merged[key] += [x for x in res.get(key) or [] if isinstance(x, dict)]
+        for res in run(window, f"{i}/{len(windows)}"):
+            merged["doc_type"] = merged["doc_type"] or res.get("doc_type")
+            merged["doc_date"] = merged["doc_date"] or res.get("doc_date")
+            merged["summary"] = merged["summary"] or res.get("summary")
+            for key in ("projects", "new_projects", "facts"):
+                merged[key] += [x for x in res.get(key) or [] if isinstance(x, dict)]
     if len(windows) > 12:
         merged["summary"] = (merged["summary"] or "") + f" (Not: doküman çok uzun; ilk {12 * budget:,} karakter analiz edildi.)"
     return merged

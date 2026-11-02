@@ -662,3 +662,55 @@ def test_azure_foundry_responses_api(monkeypatch):
             monkeypatch.setenv(k, "mock" if k == "AI_PROVIDER" else "")
         importlib.reload(config)
         srv.shutdown()
+
+
+def test_long_document_with_truncated_ai_output_is_split(client):
+    """Uzun dokümanda AI yanıtı token sınırında yarım kalırsa parça ikiye bölünüp yeniden çıkarılır; doküman hata vermez."""
+    calls = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            prompt = body["messages"][-1]["content"]
+            a, b = "IŞARET_ALFA" in prompt, "IŞARET_BETA" in prompt
+            calls.append((a, b))
+            if a and b:  # büyük parça: yanıt sığmıyor, JSON yarım kalıyor
+                content = ('{"doc_type": "ic_not", "summary": "uzun", "projects": [], "facts": [{"project_code": "UC501", "type": "not", '
+                           '"value": "yarım kalan bilgi", "evidence": "x"}, {"project_code": "UC502", "type": "ri')
+            elif a or b:
+                code = "UC501" if a else "UC502"
+                content = json.dumps({"doc_type": "ic_not", "doc_date": "2026-10-30", "summary": "parça", "projects": [{"code": code, "confidence": 0.9}],
+                                      "facts": [{"project_code": code, "type": "karar", "value": f"{code} kararı", "confidence": 0.9,
+                                                 "evidence": code, "as_of": "2026-10-30"}]})
+            else:
+                content = '{"doc_type": "ic_not", "facts": []}' if body.get("response_format") else "Yanıt"
+            out = json.dumps({"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    _create(client, "UC501", "Uzun not projesi A")
+    _create(client, "UC502", "Uzun not projesi B")
+    old = (config.AI_PROVIDER, config.AI_BASE_URL, config.AI_API_KEY, config.AI_MODEL)
+    config.AI_PROVIDER, config.AI_BASE_URL, config.AI_API_KEY, config.AI_MODEL = "openai", f"http://127.0.0.1:{srv.server_port}/v1", "k", "m"
+    try:
+        filler = "Toplantıda genel değerlendirme yapıldı ve ekip görüşlerini paylaştı.\n" * 60
+        text = f"İç değerlendirme notu\nIŞARET_ALFA UC501 için karar alındı.\n{filler}{filler}IŞARET_BETA UC502 için karar alındı.\n"
+        r = client.post("/dokumanlar", files=[("files", ("uzun_not.txt", text.encode(), "text/plain"))], data={"doc_type": "ic_not"},
+                        follow_redirects=False)
+        did = int(r.headers["location"].rsplit("/", 1)[1])
+        pipeline.drain()
+        d = db.row("SELECT * FROM documents WHERE id = ?", (did,))
+        assert d["status"] == "islendi", d["error"]
+        assert (True, True) in calls and (True, False) in calls and (False, True) in calls  # bölünüp yeniden denendi
+        vals = {f["value_text"] for f in db.rows("SELECT value_text FROM facts WHERE document_id = ? AND fact_type = 'karar'", (did,))}
+        assert vals == {"UC501 kararı", "UC502 kararı"}
+    finally:
+        config.AI_PROVIDER, config.AI_BASE_URL, config.AI_API_KEY, config.AI_MODEL = old
+        srv.shutdown()
