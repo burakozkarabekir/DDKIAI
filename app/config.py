@@ -62,11 +62,14 @@ AI_MODEL = os.getenv("AI_MODEL", "").strip()
 AI_AZURE_API_VERSION = os.getenv("AI_AZURE_API_VERSION", "2024-10-21").strip()
 AI_BASE_URL_RAW = os.getenv("AI_BASE_URL", "").strip()
 AI_URL_NOTES: list[str] = []   # adresten otomatik düzeltilenler (Ayarlar'da gösterilir)
+# AI_API_STYLE: "auto" (varsayılan: önce /chat/completions, model desteklemiyorsa /responses), "chat" ya da "responses".
+# Adres /responses ile bitiyorsa (Azure AI Foundry'deki Responses API adresi) kendiliğinden "responses" olur.
+AI_API_STYLE = os.getenv("AI_API_STYLE", "auto").strip().lower() or "auto"
 
 
 def _normalize_url(raw: str) -> str:
     """Kullanıcının yapıştırdığı adresi köke indirger; Azure tam yolundan deployment ve api-version'ı çıkarır."""
-    global AI_MODEL, AI_AZURE_API_VERSION
+    global AI_MODEL, AI_AZURE_API_VERSION, AI_API_STYLE
     from urllib.parse import parse_qs, urlparse
     url = raw.strip().strip('"').strip("'")
     if not url:
@@ -84,6 +87,11 @@ def _normalize_url(raw: str) -> str:
             AI_URL_NOTES.append(f"Deployment adı adresten alındı: {m.group(2)}")
         AI_MODEL = m.group(2)
         return m.group(1)
+    if url.endswith("/responses"):  # Azure AI Foundry: https://<kaynak>.services.ai.azure.com/openai/v1/responses
+        url = url[: -len("/responses")]
+        if AI_API_STYLE == "auto":
+            AI_API_STYLE = "responses"
+        AI_URL_NOTES.append("Adresin sonundaki /responses kaldırıldı; Responses API kullanılacak.")
     for suffix in ("/chat/completions", "/v1/messages", "/completions"):
         if url.endswith(suffix):
             url = url[: -len(suffix)]

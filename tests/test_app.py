@@ -589,3 +589,76 @@ def test_stylesheet_braces_balanced():
         depth += (ch == "{") - (ch == "}")
         assert depth >= 0
     assert depth == 0
+
+
+def test_azure_foundry_responses_api(monkeypatch):
+    """Foundry'den yapıştırılan …/openai/v1/responses adresi Responses API ile çağrılır; chat'i desteklemeyen
+    modelde otomatik olarak Responses API'ye geçilir."""
+    import importlib
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        def _send(self, code, body):
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append((self.path, self.headers.get("api-key") or self.headers.get("Authorization"), body))
+            if self.path.endswith("/chat/completions"):
+                return self._send(400, {"error": {"code": "OperationNotSupported",
+                                                  "message": "The chatCompletion operation does not work with the specified model."}})
+            if not self.path.endswith("/responses"):
+                return self._send(404, {"error": {"code": "404", "message": "Resource not found"}})
+            if "temperature" in body:
+                return self._send(400, {"error": {"message": "Unsupported parameter: 'temperature' is not supported with this model."}})
+            if body["max_output_tokens"] < 1000:  # akıl yürüten model: küçük sınırda boş ve yarım yanıt
+                return self._send(200, {"status": "incomplete", "output": [{"type": "reasoning", "summary": []}]})
+            self._send(200, {"status": "completed", "output": [
+                {"type": "reasoning", "summary": []},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": '{"durum": "hazir"}'}]}]})
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    monkeypatch.setenv("AI_API_KEY", "anahtar")
+    monkeypatch.setenv("AI_MODEL", "gpt-5.6-sol")
+    try:
+        # 1) Foundry'deki Responses adresi olduğu gibi yapıştırılmış
+        monkeypatch.setenv("AI_PROVIDER", "azure")
+        monkeypatch.setenv("AI_BASE_URL", f"{base}/openai/v1/responses")
+        importlib.reload(config)
+        config.AI_PROVIDER = "azure_v1"  # gerçek *.services.ai.azure.com adresinde otomatik algılanır
+        assert config.AI_BASE_URL == f"{base}/openai/v1" and config.AI_API_STYLE == "responses"
+        assert ai.request_url() == f"{base}/openai/v1/responses"
+        r = ai.diagnose()
+        assert r["ok"], r["steps"][-1]
+        path, key, body = seen[-1]
+        assert path == "/openai/v1/responses" and key == "anahtar"
+        assert body["model"] == "gpt-5.6-sol" and body["text"] == {"format": {"type": "json_object"}} and body["instructions"]
+        # 2) adres yalnızca …/openai/v1: chat desteklenmeyince Responses API'ye geçilir
+        seen.clear()
+        ai._STATE.clear()
+        monkeypatch.setenv("AI_BASE_URL", f"{base}/openai/v1")
+        importlib.reload(config)
+        config.AI_PROVIDER = "azure_v1"
+        assert config.AI_API_STYLE == "auto"
+        assert ai.complete([{"role": "user", "content": "selam"}]) == '{"durum": "hazir"}'
+        assert seen[0][0] == "/openai/v1/chat/completions" and seen[-1][0] == "/openai/v1/responses"
+        assert ai._STATE["style"] == "responses" and ai.request_url().endswith("/responses")
+        # gerçek Foundry adı otomatik algılanır
+        monkeypatch.setenv("AI_PROVIDER", "auto")
+        monkeypatch.setenv("AI_BASE_URL", "https://customercommunication-aifoundry.services.ai.azure.com/openai/v1/responses")
+        importlib.reload(config)
+        assert (config.AI_PROVIDER, config.AI_API_STYLE) == ("azure_v1", "responses")
+    finally:
+        ai._STATE.clear()
+        for k in ("AI_PROVIDER", "AI_BASE_URL", "AI_MODEL", "AI_API_KEY"):
+            monkeypatch.setenv(k, "mock" if k == "AI_PROVIDER" else "")
+        importlib.reload(config)
+        srv.shutdown()

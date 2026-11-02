@@ -194,10 +194,17 @@ class Probe:
                         break
                 if self.working:
                     break
-            if not self.working and names:
-                r = self._try(c, f"v1 API · model={names[0]}", "POST", f"{root}/openai/v1/chat/completions", h, {**chat_new, "model": names[0]})
+            for name in names[:3] if not self.working else []:
+                r = self._try(c, f"v1 API · sohbet · model={name}", "POST", f"{root}/openai/v1/chat/completions", h, {**chat_new, "model": name})
                 if r is not None and r.status_code < 300:
-                    self.working.append({"AI_BASE_URL": f"{root}/openai/v1", "AI_MODEL": names[0]})
+                    self.working.append({"AI_BASE_URL": f"{root}/openai/v1", "AI_MODEL": name})
+                    break
+                # Azure AI Foundry'deki yeni modeller (ör. gpt-5 ailesi) yalnızca Responses API ile çalışabilir
+                r = self._try(c, f"v1 API · Responses · model={name}", "POST", f"{root}/openai/v1/responses", h,
+                              {"model": name, "input": "Sadece 'hazir' yaz.", "max_output_tokens": 500})
+                if r is not None and r.status_code < 300:
+                    self.working.append({"AI_BASE_URL": f"{root}/openai/v1/responses", "AI_MODEL": name})
+                    break
         self.out("")
 
     def openai_like(self, base: str) -> None:

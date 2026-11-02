@@ -100,33 +100,26 @@ def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool 
                     r = client.post(f"{base}/v1/messages", headers=headers, json=body)
                     _raise(r)
                     return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
-                body = {"messages": [{"role": "system", "content": system}, *messages], "max_tokens": max_tokens,
-                        "temperature": config.AI_TEMPERATURE}
-                if json_mode:
-                    body["response_format"] = {"type": "json_object"}
-                url = request_url()
                 if provider in ("azure", "azure_v1", "azure_inference"):
                     headers = _auth_headers("api-key", bearer=False)
                 else:
                     headers = _auth_headers("Authorization", bearer=True)
-                if provider != "azure":  # klasik Azure'da model adresteki deployment'tır
-                    body["model"] = config.AI_MODEL
-                r = client.post(url, headers=headers, json=body)
-                for _ in range(3):  # sunucunun desteklemediği parametreleri ayıklayıp yeniden dene
-                    if r.status_code not in (400, 422):
-                        break
-                    err = r.text.lower()
-                    if "max_tokens" in err and "max_completion_tokens" not in body:
-                        body["max_completion_tokens"] = body.pop("max_tokens")      # o-serisi / gpt-5
-                    elif "temperature" in err and "temperature" in body:
-                        body.pop("temperature")
-                    elif "response_format" in body:
-                        body.pop("response_format")                                # JSON modu desteklenmiyor
-                    else:
-                        break
-                    r = client.post(url, headers=headers, json=body)
-                _raise(r)
-                return r.json()["choices"][0]["message"]["content"] or ""
+                if _api_style() == "responses":
+                    return _responses(client, headers, system, messages, json_mode, max_tokens)
+                try:
+                    return _chat(client, headers, system, messages, json_mode, max_tokens)
+                except AIError as exc:
+                    # Bazı yeni modeller (ör. Azure AI Foundry'deki gpt-5 ailesi) yalnızca Responses API ile çalışır.
+                    if not (config.AI_API_STYLE == "auto" and getattr(exc, "status", 0) in (400, 404, 405)
+                            and provider in ("openai", "azure_v1")):
+                        raise
+                    try:
+                        out = _responses(client, headers, system, messages, json_mode, max_tokens)
+                    except AIError as exc2:
+                        exc.args = (f"{exc.args[0]} · Responses API de denendi: {exc2.args[0][:200]}",)
+                        raise exc from None
+                    _STATE["style"] = "responses"  # bu oturumda doğrudan Responses API kullanılır
+                    return out
         except AIError as exc:
             last_exc = exc
             if not getattr(exc, "retry", False):
@@ -138,9 +131,109 @@ def complete(messages: list[dict], system: str = SYSTEM_PROMPT, json_mode: bool 
     raise last_exc
 
 
+_STATE: dict = {}  # çalışma sırasında öğrenilen: {"style": "responses"}
+
+
+def _api_style() -> str:
+    if config.AI_PROVIDER not in ("openai", "azure_v1"):
+        return "chat"
+    if config.AI_API_STYLE in ("chat", "responses"):
+        return config.AI_API_STYLE
+    return _STATE.get("style", "chat")
+
+
+def _strip_unsupported(r: httpx.Response, body: dict, token_key: str) -> bool:
+    """Sunucunun desteklemediği parametreyi istekten çıkarır; çıkarılacak bir şey yoksa False."""
+    if r.status_code not in (400, 422):
+        return False
+    err = r.text.lower()
+    if token_key == "max_tokens" and "max_tokens" in err and "max_completion_tokens" not in body:
+        body["max_completion_tokens"] = body.pop("max_tokens")      # o-serisi / gpt-5
+    elif "temperature" in err and "temperature" in body:
+        body.pop("temperature")
+    elif "response_format" in body:
+        body.pop("response_format")                                # JSON modu desteklenmiyor
+    elif "text" in body and ("format" in err or "json" in err):
+        body.pop("text")
+    else:
+        return False
+    return True
+
+
+def _post(client: httpx.Client, url: str, headers: dict, body: dict) -> tuple[httpx.Response, str]:
+    """İsteği gönderir; Azure v1 sunucusu api-version isterse 'preview' ekleyip yeniden dener."""
+    r = client.post(url, headers=headers, json=body)
+    if r.status_code in (400, 404) and "api-version" in r.text.lower() and "?" not in url and config.AI_PROVIDER == "azure_v1":
+        url += "?api-version=preview"
+        r = client.post(url, headers=headers, json=body)
+    return r, url
+
+
+def _chat(client: httpx.Client, headers: dict, system: str, messages: list[dict], json_mode: bool, max_tokens: int) -> str:
+    body = {"messages": [{"role": "system", "content": system}, *messages], "max_tokens": max_tokens,
+            "temperature": config.AI_TEMPERATURE}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    if config.AI_PROVIDER != "azure":  # klasik Azure'da model adresteki deployment'tır
+        body["model"] = config.AI_MODEL
+    r, url = _post(client, request_url(style="chat"), headers, body)
+    for _ in range(4):  # sunucunun desteklemediği parametreleri ayıklayıp yeniden dene
+        if not _strip_unsupported(r, body, "max_tokens"):
+            break
+        r = client.post(url, headers=headers, json=body)
+    _raise(r)
+    choice = r.json()["choices"][0]
+    content = (choice.get("message") or {}).get("content") or ""
+    if not content and choice.get("finish_reason") == "length":
+        # akıl yürüten modeller sınırın tamamını düşünmeye harcayabilir: daha geniş sınırla bir kez daha
+        key = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
+        body[key] = max(body[key] * 4, 4000)
+        r = client.post(url, headers=headers, json=body)
+        _raise(r)
+        content = r.json()["choices"][0]["message"].get("content") or ""
+    return content
+
+
+def _responses_text(data: dict) -> str:
+    if isinstance(data.get("output_text"), str):
+        return data["output_text"]
+    parts = []
+    for item in data.get("output") or []:
+        if item.get("type") == "message":
+            parts += [c.get("text", "") for c in item.get("content") or [] if c.get("type") in ("output_text", "text")]
+    return "".join(parts)
+
+
+def _responses(client: httpx.Client, headers: dict, system: str, messages: list[dict], json_mode: bool, max_tokens: int) -> str:
+    """OpenAI / Azure OpenAI v1 Responses API (POST {base}/responses)."""
+    body = {"model": config.AI_MODEL, "instructions": system,
+            "input": [{"role": m["role"], "content": m["content"]} for m in messages],
+            "max_output_tokens": max_tokens, "temperature": config.AI_TEMPERATURE}
+    if json_mode:
+        body["text"] = {"format": {"type": "json_object"}}
+    r, url = _post(client, request_url(style="responses"), headers, body)
+    for _ in range(4):
+        if not _strip_unsupported(r, body, "max_output_tokens"):
+            break
+        r = client.post(url, headers=headers, json=body)
+    _raise(r)
+    data = r.json()
+    text = _responses_text(data)
+    if not text and data.get("status") == "incomplete":
+        body["max_output_tokens"] = max(max_tokens * 4, 4000)
+        r = client.post(url, headers=headers, json=body)
+        _raise(r)
+        data = r.json()
+        text = _responses_text(data)
+        if not text:
+            raise AIError("Model yanıtı token sınırına takıldı (Responses API). .env dosyasında AI_MAX_TOKENS değerini artırın.")
+    return text
+
+
 def _raise(r: httpx.Response) -> None:
     if r.status_code >= 400:
         exc = AIError(f"AI uç noktası {r.status_code} döndü: {r.text[:500]}")
+        exc.status = r.status_code
         exc.retry = r.status_code in (408, 409, 429) or r.status_code >= 500
         raise exc
 
@@ -156,8 +249,10 @@ def parse_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-def request_url() -> str:
+def request_url(style: str | None = None) -> str:
     p, base = config.AI_PROVIDER, config.AI_BASE_URL
+    if (style or _api_style()) == "responses" and p in ("openai", "azure_v1"):
+        return f"{base}/responses"
     if p == "anthropic":
         return f"{base[:-3] if base.endswith('/v1') else base}/v1/messages"
     if p == "azure":
@@ -198,7 +293,7 @@ def diagnose() -> dict:
         if "AI_BASE_URL" in missing:
             return {"ok": False, "steps": steps}
     else:
-        step("AI ayarları", True, f"Sağlayıcı: {config.AI_PROVIDER} · model/deployment: {config.AI_MODEL} · anahtar: …{config.AI_API_KEY[-4:]}"
+        step("AI ayarları", True, f"Sağlayıcı: {config.AI_PROVIDER}{' (Responses API)' if _api_style() == 'responses' else ''} · model/deployment: {config.AI_MODEL} · anahtar: …{config.AI_API_KEY[-4:]}"
              + (" · " + " · ".join(config.AI_URL_NOTES) if config.AI_URL_NOTES else ""))
     url = request_url()
     step("Çağrılacak adres", True, url)
@@ -256,7 +351,9 @@ def diagnose() -> dict:
                    "(1) AI_MODEL, Azure portalındaki model adı değil DEPLOYMENT adıdır (Azure AI Foundry → Deployments listesindeki 'Name'). "
                    "(2) AI_BASE_URL yalnızca kök olsun: https://<kaynak>.openai.azure.com (ya da .cognitiveservices.azure.com). "
                    "En kolayı: portaldaki 'Target URI' / 'Endpoint' adresini olduğu gibi AI_BASE_URL'e yapıştırın; uygulama deployment adını ve "
-                   "api-version'ı oradan alır. (3) Deployment yeni oluşturulduysa birkaç dakika bekleyin.")
+                   "api-version'ı oradan alır. Azure AI Foundry adresleri (…services.ai.azure.com/openai/v1/responses ya da …/openai/v1) "
+                   "de olduğu gibi yapıştırılabilir. (3) Deployment yeni oluşturulduysa birkaç dakika bekleyin. "
+                   "Hâlâ olmuyorsa 'Derin tanılama' düğmesi çalışan adres/deployment birleşimini arar.")
         elif not transport and " 404" in msg:
             fix = ("Adres ya da model bulunamadı. AI_BASE_URL genelde /v1 ile biter (OpenAI uyumlu). Yukarıdaki 'Çağrılacak adres'i API "
                    "sağlayıcınızın dokümanıyla karşılaştırın; AI_MODEL adını sağlayıcının listesindeki adla birebir yazın.")

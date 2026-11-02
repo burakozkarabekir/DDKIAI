@@ -99,6 +99,8 @@ Uygulama standart istekleri gönderir:
 - `azure`: `POST {AI_BASE_URL}/openai/deployments/{AI_MODEL}/chat/completions?api-version=…`, `api-key: <anahtar>`
   (adres `/openai/v1` ile bitiyorsa `POST …/openai/v1/chat/completions`, model gövdede). Yeni modellerin reddettiği
   `max_tokens` / `temperature` parametreleri otomatik ayıklanır.
+- Azure AI Foundry / OpenAI **Responses API**: adres `/responses` ile bitiyorsa (ör. `https://<kaynak>.services.ai.azure.com/openai/v1/responses`)
+  `POST …/openai/v1/responses` kullanılır. `AI_API_STYLE=auto` iken sohbet API'sini desteklemeyen modelde de kendiliğinden Responses API'ye geçilir.
 - `anthropic`: `POST {AI_BASE_URL}/v1/messages`, `x-api-key: <anahtar>`.
 
 Sunucunun çıkışında kurumsal proxy varsa `HTTPS_PROXY` / `NO_PROXY` ortam değişkenleri de kullanılır.
