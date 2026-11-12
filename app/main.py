@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, db, org, pipeline, seed
+from . import ai, config, db, org, pipeline, seed
 from .auth import LoginRequired, current_user
 from .routes import documents, misc, projects
 from .web import APP_DIR, md, parse_float, redirect, templates
@@ -24,7 +24,7 @@ log = logging.getLogger("aiimpact")
 async def lifespan(_app):
     db.init_db()
     seed.ensure_users()
-    for step in (seed.purge_legacy_demo, org.ensure_org):  # geçiş adımları: hata verse de uygulama açılsın
+    for step in (seed.purge_legacy_demo, org.ensure_org, ai.apply_saved_settings):  # geçiş adımları: hata verse de uygulama açılsın
         try:
             step()
         except Exception:

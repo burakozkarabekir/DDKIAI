@@ -108,12 +108,12 @@
       <h2>AI bağlantısı</h2>
       <p class="small">Durum: <b>{{ ai_label() }}</b></p>
       <table class="small kv">
-        <tr><td class="muted">Ayar dosyası</td><td>{% if env_file %}<code style="word-break:break-all">{{ env_file }}</code>{% else %}<b class="health kirmizi">.env bulunamadı</b>{% endif %}</td></tr>
+        <tr><td class="muted">Ayar dosyası</td><td>{% if env_file %}<code style="word-break:break-all">{{ env_file }}</code>{% elif ai_saved %}<span class="muted">.env yok — ayarlar bu sayfadan</span>{% else %}<b class="health kirmizi">.env bulunamadı</b>{% endif %}</td></tr>
         <tr><td class="muted">AI_PROVIDER</td><td><code>{{ ai_cfg.provider }}</code>{% if provider_set != ai_cfg.provider %} <span class="muted">(.env: {{ provider_set }}{{ ', adresten algılandı' if ai_live() }})</span>{% endif %}</td></tr>
-        <tr><td class="muted">AI_BASE_URL</td><td><code style="word-break:break-all">{{ ai_cfg.base_url }}</code></td></tr>
+        <tr><td class="muted">AI_BASE_URL{% if ai_src('AI_BASE_URL') %} <span class="badge">{{ 'Ayarlar' if ai_src('AI_BASE_URL') == 'sayfa' else '.env' }}</span>{% endif %}</td><td><code style="word-break:break-all">{{ ai_cfg.base_url }}</code></td></tr>
         <tr><td class="muted">Çağrılacak adres</td><td><code style="word-break:break-all">{{ ai_cfg.url }}</code></td></tr>
-        <tr><td class="muted">AI_MODEL</td><td><code>{{ ai_cfg.model }}</code></td></tr>
-        <tr><td class="muted">AI_API_KEY</td><td><code>{{ ai_cfg.key }}</code></td></tr>
+        <tr><td class="muted">AI_MODEL{% if ai_src('AI_MODEL') %} <span class="badge">{{ 'Ayarlar' if ai_src('AI_MODEL') == 'sayfa' else '.env' }}</span>{% endif %}</td><td><code>{{ ai_cfg.model }}</code></td></tr>
+        <tr><td class="muted">AI_API_KEY{% if ai_src('AI_API_KEY') %} <span class="badge">{{ 'Ayarlar' if ai_src('AI_API_KEY') == 'sayfa' else '.env' }}</span>{% endif %}</td><td><code>{{ ai_cfg.key }}</code></td></tr>
         <tr><td class="muted">AI_AUTH_HEADER</td><td><code>{{ ai_cfg.auth_header }}</code></td></tr>
         <tr><td class="muted">Proxy</td><td><code>{{ ai_cfg.proxy }}</code></td></tr>
         <tr><td class="muted">SSL doğrulama</td><td>{{ ai_cfg.tls }}</td></tr>
@@ -134,9 +134,56 @@
             {% if st.fix %}<div class="small callout" style="margin-top:4px"><b>Ne yapmalı:</b> {{ st.fix }}</div>{% endif %}</div></div>
         {% endfor %}
       </div>{% endif %}
-      <p class="small muted" style="margin:10px 0 0">Değerler sunucudaki <code>.env</code> dosyasından okunur. Değiştirdikten sonra uygulamayı yeniden başlatın
-        (<code>docker compose up -d</code>). Ayrıntı: README › "Şirket içi AI bağlantısı".</p>
+      {% if user.role == 'admin' %}
+      <details class="inline" style="margin-top:14px" {{ 'open' if not ai_live() }}>
+        <summary><b>⚙ AI ayarlarını buradan girin</b> <span class="small muted">— sunucuda dosya düzenlemeden, kaydedince hemen geçerli olur</span></summary>
+        <form method="post" action="/ayarlar/ai" style="margin-top:10px" autocomplete="off">
+          <div class="field"><label>Adres (Azure'daki "Target URI" / "Endpoint" olduğu gibi)</label>
+            <input name="AI_BASE_URL" value="{{ ai_saved.AI_BASE_URL or '' }}" placeholder="{{ ai_env.AI_BASE_URL or 'https://<kaynak>.services.ai.azure.com/openai/v1/responses' }}"></div>
+          <div class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+            <div class="field"><label>Model / deployment adı</label>
+              <input name="AI_MODEL" value="{{ ai_saved.AI_MODEL or '' }}" placeholder="{{ ai_env.AI_MODEL or 'ör. gpt-5.6-sol' }}"></div>
+            <div class="field"><label>API anahtarı {% if ai_saved_key %}<span class="muted">(kayıtlı: {{ ai_saved_key }})</span>{% elif ai_env_key %}<span class="muted">(.env: {{ ai_env_key }})</span>{% endif %}</label>
+              <input name="AI_API_KEY" type="password" autocomplete="new-password" placeholder="{{ 'Değiştirmek için yazın; boş bırakılırsa kayıtlı anahtar kalır' if ai_saved_key else 'Anahtarı yapıştırın' }}"></div>
+          </div>
+          <details class="inline"><summary class="small"><b>Gelişmiş</b> <span class="muted">(çoğu zaman gerekmez)</span></summary>
+            <div class="form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px">
+              <div class="field"><label>Sağlayıcı</label><select name="AI_PROVIDER">
+                {% for v, l in [('', 'Otomatik (adresten)' ~ (' · .env: ' ~ ai_env.AI_PROVIDER if ai_env.AI_PROVIDER else '')), ('azure_v1', 'Azure OpenAI v1 / AI Foundry'), ('azure', 'Azure OpenAI (klasik)'), ('azure_inference', 'Azure AI Inference'), ('openai', 'OpenAI uyumlu gateway'), ('anthropic', 'Anthropic')] %}
+                <option value="{{ v }}" {{ 'selected' if (ai_saved.AI_PROVIDER or '') == v }}>{{ l }}</option>{% endfor %}</select></div>
+              <div class="field"><label>API türü</label><select name="AI_API_STYLE">
+                {% for v, l in [('', 'Otomatik'), ('chat', 'Chat Completions'), ('responses', 'Responses API')] %}
+                <option value="{{ v }}" {{ 'selected' if (ai_saved.AI_API_STYLE or '') == v }}>{{ l }}</option>{% endfor %}</select></div>
+              <div class="field"><label>Azure api-version</label><input name="AI_AZURE_API_VERSION" value="{{ ai_saved.AI_AZURE_API_VERSION or '' }}" placeholder="{{ ai_env.AI_AZURE_API_VERSION or '2024-10-21' }}"></div>
+              <div class="field"><label>Proxy</label><input name="AI_PROXY" value="{{ ai_saved.AI_PROXY or '' }}" placeholder="{{ ai_env.AI_PROXY or 'http://proxy:8080 (gerekmiyorsa boş)' }}"></div>
+              <div class="field"><label>Anahtar başlığı</label><input name="AI_AUTH_HEADER" value="{{ ai_saved.AI_AUTH_HEADER or '' }}" placeholder="{{ ai_env.AI_AUTH_HEADER or 'varsayılan' }}"></div>
+              {% if ai_saved_key %}<label class="row small" style="font-weight:500;align-self:end"><input type="checkbox" name="clear_key" value="1"> Kayıtlı anahtarı sil</label>{% endif %}
+            </div>
+          </details>
+          <button class="btn primary sm" style="margin-top:8px">Kaydet</button>
+          <p class="small muted" style="margin:8px 0 0">Boş bıraktığınız alanlar sunucudaki <code>.env</code> değerini kullanır. Anahtar sayfada hiçbir zaman açık gösterilmez ve yedeklere girmez.</p>
+        </form>
+      </details>
+      {% endif %}
+      <p class="small muted" style="margin:10px 0 0">Değer kaynağı: Ayarlar sayfasından kaydedilenler, yoksa sunucudaki <code>.env</code> dosyası.
+        <code>.env</code> değişikliği için uygulamayı yeniden başlatın. Ayrıntı: README › "AI bağlantısı".</p>
     </div>
+    {% if user.role == 'admin' %}
+    <div class="card" id="yedek">
+      <h2>Yedek ve veri taşıma</h2>
+      <p class="small">Tüm projeler, durum güncellemeleri, yorumlar, dokümanlar ve ayarlar tek dosyada. Başka bir kurulumdan (ör. bilgisayardaki uygulamadan
+        sunucuya) veri taşımak için: orada <b>Yedeği indir</b>, burada <b>Geri yükle</b>. Yedekte AI anahtarı bulunmaz.</p>
+      <a class="btn sm" href="/ayarlar/yedek">⬇ Yedeği indir (.tar.gz)</a>
+      <hr>
+      <form method="post" action="/ayarlar/geri-yukle" enctype="multipart/form-data"
+            data-confirm="Bu kurulumdaki tüm proje ve doküman kayıtları yedektekilerle değiştirilecek. Devam edilsin mi?">
+        <div class="field"><label>Yedekten geri yükle</label><input type="file" name="file" accept=".gz,.tgz" required></div>
+        <label class="row small" style="font-weight:500;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" name="onay" value="1" required style="margin-top:2px">
+          Bu kurulumdaki mevcut verilerin yerine geçeceğini anlıyorum (AI ayarları korunur)</label>
+        <button class="btn sm" style="margin-top:8px" data-busy="Geri yükleniyor…">⬆ Geri yükle</button>
+      </form>
+    </div>
+    {% endif %}
     <div class="card" id="depolama">
       <h2>Doküman deposu</h2>
       <table class="small kv">

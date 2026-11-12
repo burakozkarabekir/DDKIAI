@@ -3,14 +3,18 @@ import json
 import os
 import re
 import secrets
+import shutil
+import tempfile
 from datetime import date
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from markupsafe import Markup
 
-from .. import ai, charts, config, copilot, db, domain, org, pipeline, security, seed, storage, trello
+from .. import ai, backup, charts, config, copilot, db, domain, org, pipeline, security, seed, storage, trello
 from ..auth import authenticate, hash_password, require_admin, require_editor, require_internal, require_user
 from ..web import flash, md, parse_float, period, redirect, render, templates
 from .projects import comments_for
@@ -274,7 +278,68 @@ def settings(request: Request, user: dict, preview: dict | None = None, test: di
                   provider_set=config.AI_PROVIDER_SET,
                   failed_jobs=db.rows("SELECT * FROM jobs WHERE status = 'hata' ORDER BY id DESC LIMIT 10"),
                   mock_docs=db.scalar("SELECT COUNT(*) FROM documents WHERE ai_mode = 'mock' OR (ai_mode IS NULL AND status = 'islendi')"),
-                  ai_cfg=ai_cfg, deps=deps, docs=docs, orphan_brands=orphan_brands)
+                  ai_cfg=ai_cfg, deps=deps, docs=docs, orphan_brands=orphan_brands,
+                  # anahtarın kendisi sayfaya hiçbir zaman yazılmaz
+                  ai_saved={k: v for k, v in ai.saved_settings().items() if k != "AI_API_KEY"},
+                  ai_saved_key=_mask(ai.saved_settings().get("AI_API_KEY", "")), ai_env_key=_mask(config._ENV_AI.get("AI_API_KEY") or ""),
+                  ai_env={k: config._ENV_AI.get(k) or "" for k in config.AI_UI_KEYS if k != "AI_API_KEY"}, ai_src=config.ai_source)
+
+
+def _mask(key: str) -> str:
+    return ("•" * 8 + key[-4:]) if len(key) > 8 else ("tanımlı" if key else "")
+
+
+@router.post("/ayarlar/ai")
+async def ai_settings_save(request: Request, user=Depends(require_admin)):
+    """AI bağlantısını sunucudaki .env dosyasına dokunmadan Ayarlar sayfasından tanımlar (hemen geçerli olur)."""
+    form = await request.form()
+    current = ai.saved_settings()
+    new = {}
+    for key in config.AI_UI_KEYS:
+        value = str(form.get(key) or "").strip()
+        if key == "AI_API_KEY" and not value and not form.get("clear_key"):
+            value = current.get(key, "")  # boş bırakılan anahtar alanı mevcut anahtarı korur
+        if value:
+            new[key] = value
+    db.set_setting(backup.AI_SETTINGS_KEY, json.dumps(new))
+    ai.apply_saved_settings()
+    db.log(user["id"], "ai_settings_saved", detail=", ".join(sorted(k for k in new if k != "AI_API_KEY")))
+    flash(request, "AI ayarları kaydedildi ve hemen geçerli oldu. 'Bağlantıyı test et' ile deneyin.")
+    return redirect("/ayarlar#ai")
+
+
+@router.get("/ayarlar/yedek")
+def backup_download(request: Request, user=Depends(require_admin)):
+    path = backup.make_backup()
+    db.log(user["id"], "backup_downloaded")
+    return FileResponse(path, filename=path.name, media_type="application/gzip",
+                        background=BackgroundTask(shutil.rmtree, path.parent, ignore_errors=True))
+
+
+@router.post("/ayarlar/geri-yukle")
+async def backup_restore(request: Request, file: UploadFile = File(...), onay: str = Form(""), user=Depends(require_admin)):
+    if not onay:
+        flash(request, "Geri yükleme için onay kutusunu işaretleyin.", "error")
+        return redirect("/ayarlar#yedek")
+    tmp = Path(tempfile.mkdtemp(prefix="aiimpact-yukle-")) / "yedek.tar.gz"
+    try:
+        with open(tmp, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                out.write(chunk)
+        stats = await run_in_threadpool(backup.restore, tmp)
+    except ValueError as exc:
+        flash(request, f"Geri yüklenemedi: {exc}", "error")
+        return redirect("/ayarlar#yedek")
+    finally:
+        shutil.rmtree(tmp.parent, ignore_errors=True)
+    # geri yüklenen veritabanını bu sürüme göre tamamla
+    db.init_db()
+    seed.ensure_users()
+    org.ensure_org()
+    ai.apply_saved_settings()
+    db.log(None, "backup_restored", detail=str(stats))
+    flash(request, f"Yedek geri yüklendi: {stats['proje']} proje, {stats['doküman']} doküman, {stats['dosya']} dosya.")
+    return redirect("/ayarlar#yedek")
 
 
 @router.post("/ayarlar/sifirla")

@@ -171,9 +171,10 @@ for s in r["steps"]:
     print(f"      {'✓' if s['ok'] else '✗'} {s['name']}: {str(s['detail'])[:150]}")
     if s.get("fix") and not s["ok"]:
         print(f"        → {s['fix'][:400]}")
-print("    " + ("AI bağlantısı çalışıyor." if r["ok"] else "AI bağlantısı kurulamadı; uygulama demo modunda çalışır. Ayarlar → Derin tanılama."))
+print("    " + ("AI bağlantısı çalışıyor." if r["ok"] else "AI bağlantısı henüz yok: tarayıcıda Ayarlar → 'AI ayarlarını buradan girin' (sunucuda dosya düzenlemek gerekmez)."))
 EOF
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 printf '\n\033[1;32mKurulum tamam.\033[0m Ekip arkadaşlarınız tarayıcıda şu adresi açsın:\n\n    http://%s:%s\n\n' "${IP:-<sunucu-ip>}" "$PORT"
+echo "Sonraki adımlar tarayıcıda (Ayarlar sayfası): AI ayarlarını girin · verileri 'Geri yükle' ile taşıyın · ekibi ekleyin."
 echo "Yönetim:  bash deploy/servis.sh durum | yeniden | durdur | log    ·    Güncelleme: bash deploy/guncelle.sh"

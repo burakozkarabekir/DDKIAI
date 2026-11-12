@@ -6,6 +6,7 @@ Trello panosunun yerini alır; dokümanlardan otomatik bilgi çıkarır, kaynakl
 - Süreç tasarımı: [`docs/SUREC_TASARIMI.md`](docs/SUREC_TASARIMI.md)
 - Veri mimarisi (doküman bilgi katmanı): [`docs/VERI_MIMARISI.md`](docs/VERI_MIMARISI.md)
 - **Sunucuya kurulum (ekibin kullanımı için):** [`docs/SUNUCU_KURULUMU.md`](docs/SUNUCU_KURULUMU.md)
+- **Devir teslim:** [`docs/DEVIR_TESLIM.md`](docs/DEVIR_TESLIM.md)
 
 ## Modüller
 
@@ -21,7 +22,7 @@ Trello panosunun yerini alır; dokümanlardan otomatik bilgi çıkarır, kaynakl
 | **İnceleme Kuyruğu** | Proje alanını değiştirecek önerilerin onayı (kaynak + alıntıyla) |
 | **AI Danışman** | Kaynak göstererek soru-cevap, boşluk analizi, haftalık yorum, içgörü arşivi. Her sayfanın sağ alt köşesindeki **AI'a sor** balonu açık sayfanın bağlamıyla (proje, Copilot, doküman alanı) yanıt verir |
 | **AI Security** | Üç ayrı sayfa: **Genel & Girişimler** (AI Studio, Shadow AI, DLP metrikleri), **Copilot Kullanımı** (M365 Copilot Excel/CSV: benimseme, departman/uygulama kırılımı, kullanılmayan lisanslar, dönemsel eğilim, AI analizi — kişisel veri AI'a gönderilmez), **AI Yönetişimi** (politika/standart dokümanları ve AI analizi) |
-| **Ayarlar** | 10 departman ve bağlı markalar, AI bağlantı testi ve derin tanılama, Trello aktarımı, depolama durumu, işleme kuyruğu |
+| **Ayarlar** | 10 departman ve bağlı markalar, AI bağlantısı (adres/anahtar/model sayfadan girilebilir), bağlantı testi ve derin tanılama, Trello aktarımı, **yedeği indir / geri yükle** (kurulumlar arası veri taşıma), depolama durumu, işleme kuyruğu |
 
 ### Departman ve marka kırılımı
 

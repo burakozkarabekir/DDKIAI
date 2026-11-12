@@ -1,2 +1,2 @@
 """AI Impact Merkezi."""
-__version__ = "3.3"
+__version__ = "3.4"

@@ -714,3 +714,82 @@ def test_long_document_with_truncated_ai_output_is_split(client):
     finally:
         config.AI_PROVIDER, config.AI_BASE_URL, config.AI_API_KEY, config.AI_MODEL = old
         srv.shutdown()
+
+
+def test_ai_settings_from_settings_page(client):
+    """AI bağlantısı sunucuda .env düzenlemeden Ayarlar sayfasından tanımlanır; anahtar sayfaya yazılmaz."""
+    key = "gizli-anahtar-1234567890-WGMB"
+    try:
+        r = client.post("/ayarlar/ai", data={"AI_BASE_URL": "https://dogus-ai.services.ai.azure.com/openai/v1/responses",
+                                             "AI_MODEL": "gpt-5.6-sol", "AI_API_KEY": key}, follow_redirects=False)
+        assert r.status_code == 303
+        assert (config.AI_PROVIDER, config.AI_API_STYLE, config.AI_MODEL, config.AI_API_KEY) == ("azure_v1", "responses", "gpt-5.6-sol", key)
+        assert ai.request_url() == "https://dogus-ai.services.ai.azure.com/openai/v1/responses"
+        page = client.get("/ayarlar").text
+        assert key not in page and "WGMB" in page and "Ayarlar</span>" in page
+        # anahtar alanı boş bırakılırsa kayıtlı anahtar korunur, model değişir
+        client.post("/ayarlar/ai", data={"AI_BASE_URL": "https://dogus-ai.services.ai.azure.com/openai/v1/responses", "AI_MODEL": "gpt-x"})
+        assert (config.AI_MODEL, config.AI_API_KEY) == ("gpt-x", key)
+        # yeniden başlatmada veritabanından yüklenir
+        config.configure_ai({})
+        assert config.AI_PROVIDER == "mock"
+        ai.apply_saved_settings()
+        assert config.AI_MODEL == "gpt-x" and config.AI_API_KEY == key
+        # "Kayıtlı anahtarı sil" + boş alanlar → .env değerlerine (burada demo modu) dönüş
+        client.post("/ayarlar/ai", data={"clear_key": "1"})
+        assert config.AI_PROVIDER == "mock" and not config.AI_API_KEY and ai.saved_settings() == {}
+    finally:
+        db.set_setting("ai_settings", "{}")
+        ai.apply_saved_settings()
+
+
+def test_backup_download_and_restore(client):
+    """Bilgisayardaki kurulumdan indirilen yedek, sunucudaki kurulumda Ayarlar sayfasından geri yüklenir."""
+    import tarfile
+    pid = _create(client, "UC777", "Yedek testi projesi")
+    up = client.post("/dokumanlar", files=[("files", ("yedek_notu.txt", "UC777 icin karar: pilot basliyor.".encode(), "text/plain"))],
+                     data={"doc_type": "ic_not"}, follow_redirects=False)
+    did = int(up.headers["location"].rsplit("/", 1)[1])
+    pipeline.drain()
+    stored = db.scalar("SELECT storage_path FROM documents WHERE id = ?", (did,))
+    db.set_setting("ai_settings", json.dumps({"AI_MODEL": "m1", "AI_API_KEY": "yedege-girmemeli"}))
+    try:
+        r = client.get("/ayarlar/yedek")
+        assert r.status_code == 200 and r.headers["content-type"] == "application/gzip"
+        blob = r.content
+        with tarfile.open(fileobj=io.BytesIO(blob)) as tar:
+            names = tar.getnames()
+            assert "data/app.db" in names and f"data/files/{stored}" in names
+            raw = tar.extractfile("data/app.db").read()
+        assert b"yedege-girmemeli" not in raw  # anahtar yedekte yok
+
+        # sunucudaki kurulumda veri yok ya da farklı: proje ve dosya silinmiş, AI anahtarı burada başka
+        db.execute("DELETE FROM projects WHERE id = ?", (pid,))
+        (config.STORAGE_DIR / stored).unlink()
+        db.set_setting("ai_settings", json.dumps({"AI_MODEL": "sunucu", "AI_API_KEY": "sunucu-anahtari"}))
+        r = client.post("/ayarlar/geri-yukle", files={"file": ("yedek.tar.gz", blob, "application/gzip")}, data={"onay": "1"},
+                        follow_redirects=True)
+        assert "Yedek geri yüklendi" in r.text
+        assert db.scalar("SELECT name FROM projects WHERE id = ?", (pid,)) == "Yedek testi projesi"
+        assert (config.STORAGE_DIR / stored).exists()
+        assert json.loads(db.setting("ai_settings"))["AI_API_KEY"] == "sunucu-anahtari"  # sunucunun AI ayarı korunur
+        assert len(org.departments()) == 10 and client.get("/").status_code == 200
+
+        # güvenli olmayan arşiv ve yanlış dosya reddedilir
+        evil = io.BytesIO()
+        with tarfile.open(fileobj=evil, mode="w:gz") as tar:
+            for name, data in (("data/app.db", raw), ("data/files/../../kotu.txt", b"x")):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        r = client.post("/ayarlar/geri-yukle", files={"file": ("k.tar.gz", evil.getvalue(), "application/gzip")}, data={"onay": "1"},
+                        follow_redirects=True)
+        assert "Güvenli olmayan" in r.text and not (config.STORAGE_DIR.parent / "kotu.txt").exists()
+        r = client.post("/ayarlar/geri-yukle", files={"file": ("x.tar.gz", b"bozuk", "application/gzip")}, data={"onay": "1"},
+                        follow_redirects=True)
+        assert "Geri yüklenemedi" in r.text
+        r = client.post("/ayarlar/geri-yukle", files={"file": ("yedek.tar.gz", blob, "application/gzip")}, follow_redirects=True)
+        assert "onay kutusunu" in r.text  # onaysız geri yükleme yapılmaz
+    finally:
+        db.set_setting("ai_settings", "{}")
+        ai.apply_saved_settings()

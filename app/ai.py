@@ -40,6 +40,19 @@ class AIError(Exception):
     pass
 
 
+def saved_settings() -> dict:
+    """Ayarlar sayfasından kaydedilen AI ayarları (veritabanında)."""
+    try:
+        return json.loads(db.setting("ai_settings") or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+
+def apply_saved_settings() -> None:
+    config.configure_ai(saved_settings())
+    _STATE.clear()
+
+
 def is_live() -> bool:
     return config.AI_PROVIDER != "mock" and bool(config.AI_BASE_URL)
 
@@ -335,11 +348,12 @@ def diagnose() -> dict:
 
     # 1) ayar dosyası
     if not config.ENV_FILE and not config.AI_BASE_URL:
-        step("Ayar dosyası (.env)", False, f"{config.BASE_DIR} klasöründe .env dosyası bulunamadı.",
-             "Proje klasöründe (içinde app klasörü ve requirements.txt olan klasör) .env.example dosyasının kopyasını .env adıyla oluşturun.")
+        step("AI ayarları", False, "AI bağlantısı tanımlı değil (.env dosyası yok, Ayarlar sayfasından da girilmemiş).",
+             "Bu sayfadaki 'AI ayarlarını buradan girin' formuna adres, anahtar ve model adını yazıp kaydedin.")
         return {"ok": False, "steps": steps}
     if not config.ENV_FILE:
-        step("Ayar dosyası (.env)", True, "Dosya yok; ayarlar ortam değişkenlerinden okundu (ör. Docker env_file).")
+        step("Ayar dosyası (.env)", True, "Dosya yok; AI ayarları " + ("Ayarlar sayfasından" if config.AI_UI_OVERRIDES else "ortam değişkenlerinden")
+             + " okundu.")
     if config.ENV_FILE:
         note = " (adı .env.txt — çalışır, ama .env olarak yeniden adlandırmanız önerilir)" if config.ENV_FILE.name != ".env" else ""
         step("Ayar dosyası (.env)", True, f"Okundu: {config.ENV_FILE}{note}")
@@ -348,7 +362,7 @@ def diagnose() -> dict:
     if missing:
         in_file = [k for k in missing if k in config.ENV_KEYS]
         step("AI ayarları", False, "Boş: " + ", ".join(missing) + (" (dosyada satır var ama değer boş)" if in_file else ""),
-             "Bu satırları .env dosyasında doldurun, kaydedin ve uygulamayı yeniden başlatın (bilgisayarda: terminalde Ctrl+C, sonra uvicorn app.main:app --reload · sunucuda: bash deploy/servis.sh yeniden).")
+             "Bu sayfadaki 'AI ayarlarını buradan girin' formundan girin (hemen geçerli olur) ya da .env dosyasında doldurup uygulamayı yeniden başlatın.")
         if "AI_BASE_URL" in missing:
             return {"ok": False, "steps": steps}
     else:

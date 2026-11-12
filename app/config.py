@@ -58,13 +58,13 @@ SOFFICE_PATH = os.getenv("SOFFICE_PATH", "")
 # AI_PROVIDER: "auto" (varsayılan; adresten tahmin), "openai" (OpenAI uyumlu /chat/completions — vLLM, LiteLLM,
 #              Ollama, kurumsal gateway), "azure" (Azure OpenAI), "anthropic" (Messages API).
 #              AI_BASE_URL boşsa demo (mock) modunda çalışılır.
-AI_MODEL = os.getenv("AI_MODEL", "").strip()
-AI_AZURE_API_VERSION = os.getenv("AI_AZURE_API_VERSION", "2024-10-21").strip()
-AI_BASE_URL_RAW = os.getenv("AI_BASE_URL", "").strip()
+# Ayarlar sayfasından değiştirilebilen AI anahtarları. Sayfadan kaydedilen değer .env'deki değerin önüne geçer
+# (veritabanında saklanır); sayfada boş bırakılan alan .env'deki değere döner.
+AI_UI_KEYS = ("AI_BASE_URL", "AI_API_KEY", "AI_MODEL", "AI_PROVIDER", "AI_API_STYLE", "AI_AZURE_API_VERSION",
+              "AI_PROXY", "AI_AUTH_HEADER")
+_ENV_AI = {k: os.environ.get(k) for k in AI_UI_KEYS}   # .env / ortamdan gelen özgün değerler
+AI_UI_OVERRIDES: dict[str, str] = {}                     # Ayarlar sayfasından gelen değerler (anahtar maskesiz)
 AI_URL_NOTES: list[str] = []   # adresten otomatik düzeltilenler (Ayarlar'da gösterilir)
-# AI_API_STYLE: "auto" (varsayılan: önce /chat/completions, model desteklemiyorsa /responses), "chat" ya da "responses".
-# Adres /responses ile bitiyorsa (Azure AI Foundry'deki Responses API adresi) kendiliğinden "responses" olur.
-AI_API_STYLE = os.getenv("AI_API_STYLE", "auto").strip().lower() or "auto"
 
 
 def _normalize_url(raw: str) -> str:
@@ -99,10 +99,6 @@ def _normalize_url(raw: str) -> str:
     return url
 
 
-AI_BASE_URL = _normalize_url(AI_BASE_URL_RAW)
-AI_PROVIDER_SET = os.getenv("AI_PROVIDER", "auto").strip().lower() or "auto"
-
-
 def _detect_provider(url: str) -> str:
     host = url.split("/")[2].lower() if "://" in url else url.lower()
     path = url.lower()
@@ -117,17 +113,50 @@ def _detect_provider(url: str) -> str:
     return "openai"
 
 
-# "auto" ya da adres girilmiş ama "mock" bırakılmışsa sağlayıcı adresten tahmin edilir.
-if AI_PROVIDER_SET in ("auto", "mock") and AI_BASE_URL:
-    AI_PROVIDER = _detect_provider(AI_BASE_URL)
-elif AI_PROVIDER_SET == "azure" and AI_BASE_URL:
-    AI_PROVIDER = _detect_provider(AI_BASE_URL) if ".azure" in AI_BASE_URL else "azure"
-else:
-    AI_PROVIDER = AI_PROVIDER_SET if AI_BASE_URL else "mock"
-AI_API_KEY = os.getenv("AI_API_KEY", "")
-# Anahtarın gönderileceği başlık. Boşsa sağlayıcının varsayılanı (Authorization: Bearer / api-key / x-api-key).
-# Örn. API Management arkasındaysa: AI_AUTH_HEADER=Ocp-Apim-Subscription-Key
-AI_AUTH_HEADER = os.getenv("AI_AUTH_HEADER", "")
+def configure_ai(overrides: dict | None = None) -> None:
+    """AI ayarlarını (yeniden) hesaplar. overrides: Ayarlar sayfasından kaydedilen değerler (boş olanlar yok sayılır)."""
+    global AI_UI_OVERRIDES, AI_MODEL, AI_AZURE_API_VERSION, AI_BASE_URL_RAW, AI_API_STYLE, AI_BASE_URL, AI_PROVIDER_SET
+    global AI_PROVIDER, AI_API_KEY, AI_AUTH_HEADER, AI_PROXY
+    if overrides is not None:
+        AI_UI_OVERRIDES = {k: str(v).strip() for k, v in overrides.items() if k in AI_UI_KEYS and str(v or "").strip()}
+
+    def get(key: str, default: str = "") -> str:
+        v = AI_UI_OVERRIDES.get(key) or _ENV_AI.get(key)
+        return default if v is None or v == "" else v
+
+    AI_URL_NOTES.clear()
+    # AI_PROVIDER: "auto" (varsayılan; adresten tahmin), "openai" (OpenAI uyumlu /chat/completions — vLLM, LiteLLM,
+    #              Ollama, kurumsal gateway), "azure" (Azure OpenAI), "anthropic" (Messages API).
+    #              AI_BASE_URL boşsa demo (mock) modunda çalışılır.
+    AI_MODEL = get("AI_MODEL").strip()
+    AI_AZURE_API_VERSION = get("AI_AZURE_API_VERSION", "2024-10-21").strip()
+    AI_BASE_URL_RAW = get("AI_BASE_URL").strip()
+    # AI_API_STYLE: "auto" (önce /chat/completions, model desteklemiyorsa /responses), "chat" ya da "responses".
+    # Adres /responses ile bitiyorsa (Azure AI Foundry'deki Responses API adresi) kendiliğinden "responses" olur.
+    AI_API_STYLE = get("AI_API_STYLE", "auto").strip().lower() or "auto"
+    AI_BASE_URL = _normalize_url(AI_BASE_URL_RAW)
+    AI_PROVIDER_SET = get("AI_PROVIDER", "auto").strip().lower() or "auto"
+    # "auto" ya da adres girilmiş ama "mock" bırakılmışsa sağlayıcı adresten tahmin edilir.
+    if AI_PROVIDER_SET in ("auto", "mock") and AI_BASE_URL:
+        AI_PROVIDER = _detect_provider(AI_BASE_URL)
+    elif AI_PROVIDER_SET == "azure" and AI_BASE_URL:
+        AI_PROVIDER = _detect_provider(AI_BASE_URL) if ".azure" in AI_BASE_URL else "azure"
+    else:
+        AI_PROVIDER = AI_PROVIDER_SET if AI_BASE_URL else "mock"
+    AI_API_KEY = get("AI_API_KEY").strip()
+    # Anahtarın gönderileceği başlık. Boşsa sağlayıcının varsayılanı (Authorization: Bearer / api-key / x-api-key).
+    # Örn. API Management arkasındaysa: AI_AUTH_HEADER=Ocp-Apim-Subscription-Key
+    AI_AUTH_HEADER = get("AI_AUTH_HEADER").strip()
+    # Uç noktaya bir proxy üzerinden çıkılıyorsa: AI_PROXY=http://proxy.sirket.local:8080 (boşsa HTTPS_PROXY ortam değişkeni)
+    AI_PROXY = get("AI_PROXY").strip()
+
+
+def ai_source(key: str) -> str:
+    """Değerin nereden geldiği: 'sayfa' (Ayarlar), 'env' (.env / ortam) ya da ''."""
+    return "sayfa" if AI_UI_OVERRIDES.get(key) else ("env" if _ENV_AI.get(key) else "")
+
+
+configure_ai()
 try:
     AI_EXTRA_HEADERS = json.loads(os.getenv("AI_EXTRA_HEADERS", "") or "{}")
 except json.JSONDecodeError:
@@ -137,8 +166,6 @@ AI_VERIFY_TLS = os.getenv("AI_VERIFY_TLS", "1") == "1"
 # Şirket ağları SSL trafiğini kendi sertifikalarıyla inceler; 1 iken işletim sisteminin (Windows/macOS) sertifika
 # deposu kullanılır, böylece şirket sertifikası ayrıca tanıtılmadan kabul edilir.
 AI_USE_SYSTEM_CERTS = os.getenv("AI_USE_SYSTEM_CERTS", "1") == "1"
-# Uç noktaya bir proxy üzerinden çıkılıyorsa: AI_PROXY=http://proxy.sirket.local:8080 (boşsa HTTPS_PROXY ortam değişkeni)
-AI_PROXY = os.getenv("AI_PROXY", "").strip()
 # Not: .env'deki NO_PROXY / HTTPS_PROXY satırları ortam değişkeni olarak yüklenir ve HTTP istemcisi tarafından kullanılır.
 AI_CA_BUNDLE = os.getenv("AI_CA_BUNDLE", "")
 AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.2"))
