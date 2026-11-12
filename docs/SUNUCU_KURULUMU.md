@@ -8,9 +8,14 @@ Sonuçta ekip arkadaşlarınız şu adresi açar: **http://192.168.75.30:8000**
 
 ---
 
-## 1. Sunucuyu tanıyın (2 dk)
+> **Terminale yapıştırma:** CyberArk'ın açtığı PuTTY penceresinde Ctrl+V çalışmaz; **farenin sağ tuşuna** tıklayın (ya da
+> Shift+Insert). Hiçbiri yapıştırmıyorsa CyberArk panoyu kapatmıştır: komutları elle yazın. Rehberdeki zorunlu komutlar kısadır
+> (adım 2c ve 3); uzun komutlar yalnızca kendi bilgisayarınızda (PowerShell) çalıştırılır.
 
-CyberArk'ta **Connect** ile sunucuya bağlanın ve şu komutları yapıştırın:
+## 1. Sunucuyu tanıyın (2 dk, isteğe bağlı)
+
+`deploy/kur.sh` bu kontrolleri zaten yapar. Önceden bakmak isterseniz CyberArk'ta **Connect** ile bağlanıp şunları çalıştırın
+(elle yazacaksanız yalnızca ilk iki satır yeterli: `python3 -V` ve `sudo -n true && echo VAR`):
 
 ```bash
 grep PRETTY /etc/os-release; python3 --version; ls /usr/bin/python3.1* 2>/dev/null
@@ -28,14 +33,23 @@ curl -s -o /dev/null -w "azure: %{http_code}\n" --max-time 10 https://customerco
 
 ## 2. Dosyaları sunucuya taşıyın
 
-**a) Bilgisayarınızda paketleyin.** Önce bilgisayarınızdaki uygulamayı durdurun (terminalde Ctrl+C). Sonra proje klasöründe
-PowerShell'de:
+**a) Bilgisayarınızda paketleyin.** DMZ sunucusu internete çıkamadığı için Python paketleri de bilgisayarınızda indirilip
+pakete eklenir.
+
+1. GitHub'dan dalın son hâlini indirip açın. İçindeki `app`, `deploy`, `docs` klasörlerini ve `requirements.txt`,
+   `.env.example` dosyalarını kendi proje klasörünüze kopyalayın (üzerine yazın). Klasördeki `data` ve `.env` yerinde kalsın.
+2. Bilgisayarınızdaki uygulamayı durdurun (terminalde Ctrl+C).
+3. Proje klasöründe PowerShell'de çalıştırın:
 
 ```powershell
-tar -czf ai-impact.tgz app deploy docs requirements.txt .env.example .env data
+foreach ($v in "3.10","3.11","3.12") { py -3.15 -m pip download pip -r requirements.txt -d wheels --only-binary=:all: --platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64 --python-version $v }
+tar -czf ai-impact.tgz app deploy docs requirements.txt .env.example .env data wheels
 ```
 
-`data` mevcut verilerinizi (projeler, dokümanlar, yorumlar), `.env` AI ayarlarınızı sunucuya taşır.
+- `wheels` klasörü, sunucudaki Python 3.10/3.11/3.12 için paketleri içerir (~26 MB). Ubuntu 22.04'te 3.10, 24.04'te 3.12 gelir.
+- `data` mevcut verilerinizi (projeler, dokümanlar, yorumlar) taşır.
+- `.env` AI ayarlarınızı taşır.
+
 Taşıdıktan sonra herkes sunucudaki adresi kullanmalı; bilgisayarınızdaki kopya eski kalır.
 
 **b) Sunucuya gönderin.** CyberArk'ta **Connect** düğmesinin yanındaki oka tıklayın. Listede **WinSCP / SFTP** varsa onunla
@@ -46,10 +60,12 @@ dosya aktarım (PSM-WinSCP / SFTP) bağlantısı isteyin.
 > (özel depo için GitHub'dan salt okunur bir erişim anahtarı gerekir). Bu yolda `.env` dosyasını sunucuda `nano ~/ai-impact/.env` ile
 > oluşturup değerleri yapıştırırsınız; veriler boş başlar (Trello'yu yeniden aktarabilirsiniz).
 
-**c) Sunucuda açın:**
+**c) Sunucuda açın** (kısa komutlar, elle yazılabilir):
 
 ```bash
-mkdir -p ~/ai-impact && tar -xzf ~/ai-impact.tgz -C ~/ai-impact && cd ~/ai-impact
+mkdir ai-impact
+tar -xzf ai-impact.tgz -C ai-impact
+cd ai-impact
 ```
 
 ## 3. Kurun (tek komut)
@@ -131,7 +147,8 @@ Tüm komutlar `~/ai-impact` klasöründe çalıştırılır:
 1. Bilgisayarınızda yeni sürümü GitHub'dan indirip klasöründe paketleyin. **`data` ve `.env` eklemeyin**, yoksa sunucudaki
    verilerin üzerine yazılır:
    ```powershell
-   tar -czf guncelleme.tgz app deploy docs requirements.txt
+   foreach ($v in "3.10","3.11","3.12") { py -3.15 -m pip download pip -r requirements.txt -d wheels --only-binary=:all: --platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64 --python-version $v }
+   tar -czf guncelleme.tgz app deploy docs requirements.txt wheels
    ```
 2. Dosyayı aynı yolla sunucuya gönderin ve sunucuda çalıştırın:
    ```bash
@@ -150,21 +167,17 @@ cp -a /tmp/ai-impact/data/. data/ && bash deploy/servis.sh baslat
 
 ## İnternetsiz kurulum
 
-Sunucu pypi.org'a çıkamıyorsa paketleri bilgisayarınızda indirip dosyalarla birlikte gönderin. Proje klasöründe PowerShell'de
-(sondaki `3.11`, sunucudaki `python3 --version` sürümü olmalı: 3.10, 3.11, 3.12…):
-
-```powershell
-py -m pip download -r requirements.txt -d wheels --only-binary=:all: --platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64 --python-version 3.11
-tar -czf ai-impact.tgz app deploy docs requirements.txt .env.example .env data wheels
-```
-
-`deploy/kur.sh` `wheels` klasörünü görünce internete çıkmadan kurar.
+Adım 2a'daki paket bunu zaten yapar: `deploy/kur.sh` `wheels` klasörünü görünce internete çıkmadan kurar. Ubuntu'da
+`python3-venv` paketi kurulu değilse (internetsiz sunucuda kurulamaz) betik pip'siz sanal ortam açar ve pip'i `wheels`
+içindeki paketten çalıştırır; ek bir şey yapmanız gerekmez.
 
 ## Sorun giderme
 
 | Belirti | Çözüm |
 |---|---|
 | `$'\r': command not found` | Dosyalar Windows'ta düzenlenmiş: `sed -i 's/\r$//' deploy/*.sh` ve tekrar çalıştırın |
+| "Uygun Python bulunamadı" (ör. Ubuntu 20.04'te Python 3.8) | Taşınabilir Python kullanın: github.com/astral-sh/python-build-standalone/releases sayfasından `cpython-3.12.…-x86_64-unknown-linux-gnu-install_only.tar.gz` dosyasını indirip pakete ekleyin. Sunucuda proje klasöründe `tar -xzf cpython-3.12*.tar.gz` (bir `python` klasörü açılır), sonra tekrar `bash deploy/kur.sh`. Betik bu Python'u kendiliğinden kullanır |
+| "wheels klasöründe bu Python sürümüne uygun paket yok" | Sunucudaki sürümü öğrenin (`python3 -V`) ve 2a'daki `foreach` listesine ekleyip paketi yeniden oluşturun |
 | `address already in use` | Port dolu: `PORT=8080 bash deploy/kur.sh` (adres de `:8080` olur) |
 | Sunucuda `servis.sh durum` "yanıt veriyor" diyor ama ekip açamıyor | Ağ izni eksik: adım 4 |
 | AI analizleri çalışmıyor | Uygulamada **Ayarlar → Bağlantıyı test et / Derin tanılama**. Sunucudan Azure'a çıkış yoksa adım 4, madde 2 |

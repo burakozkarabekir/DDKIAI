@@ -24,7 +24,8 @@ sed -i 's/\r$//' deploy/*.sh requirements.txt 2>/dev/null || true
 # ---------------------------------------------------------------- 1) Python
 say "1/6 Python kontrolü (3.10 veya üzeri gerekir)"
 PY=""
-for c in ${PYTHON:-} python3.13 python3.12 python3.11 python3.10 python3; do
+# python/: sunucudaki Python eskiyse proje klasörüne açılan taşınabilir Python (docs/SUNUCU_KURULUMU.md → Sorun giderme)
+for c in ${PYTHON:-} "$APP_DIR/python/bin/python3" python3.13 python3.12 python3.11 python3.10 python3; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
     PY="$(command -v "$c")"; break
   fi
@@ -42,15 +43,25 @@ ok "$("$PY" --version) → $PY"
 # ---------------------------------------------------------------- 2) paketler
 say "2/6 Sanal ortam (.venv) ve paketler"
 if [ ! -x .venv/bin/python ]; then
-  "$PY" -m venv .venv || { rm -rf .venv; die "Sanal ortam kurulamadı. Ubuntu/Debian'da: sudo apt-get install -y python3-venv"; }
+  # Ubuntu'da python3-venv paketi kurulu değilse (internetsiz sunucuda kurulamaz) pip'siz sanal ortam açılır;
+  # pip, wheels klasöründeki pip paketinden çalıştırılır.
+  "$PY" -m venv .venv >/dev/null 2>&1 || { rm -rf .venv; "$PY" -m venv --without-pip .venv; } \
+    || { rm -rf .venv; die "Sanal ortam kurulamadı. Ubuntu/Debian'da: sudo apt-get install -y python3-venv"; }
 fi
 VPY="$APP_DIR/.venv/bin/python"
-if [ -d wheels ]; then
-  "$VPY" -m pip install --quiet --no-index --find-links wheels -r requirements.txt \
-    || die "wheels klasöründeki paketler bu Python sürümüne uymuyor. docs/SUNUCU_KURULUMU.md → 'İnternetsiz kurulum'."
+if "$VPY" -m pip --version >/dev/null 2>&1; then
+  PIP=("$VPY" -m pip)
+elif PIPWHL="$(ls wheels/pip-*.whl 2>/dev/null | head -1)" && [ -n "$PIPWHL" ]; then
+  PIP=("$VPY" "$PIPWHL/pip")
 else
-  "$VPY" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
-  "$VPY" -m pip install --quiet -r requirements.txt \
+  die "Bu Python'da pip yok. wheels klasörüyle kurun (docs/SUNUCU_KURULUMU.md → 'İnternetsiz kurulum'; pip paketi de indirilir) ya da: sudo apt-get install -y python3-venv"
+fi
+if [ -d wheels ]; then
+  "${PIP[@]}" install --quiet --no-index --find-links wheels -r requirements.txt pip \
+    || die "wheels klasöründe bu Python sürümüne ($("$PY" --version 2>&1)) uygun paket yok. docs/SUNUCU_KURULUMU.md → 'İnternetsiz kurulum'."
+else
+  "${PIP[@]}" install --quiet --upgrade pip >/dev/null 2>&1 || true
+  "${PIP[@]}" install --quiet -r requirements.txt \
     || die "Paketler indirilemedi. Sunucu pypi.org'a çıkamıyorsa docs/SUNUCU_KURULUMU.md → 'İnternetsiz kurulum'. Proxy gerekiyorsa önce: export HTTPS_PROXY=http://proxy-adresi:port"
 fi
 ok "Paketler kuruldu"
