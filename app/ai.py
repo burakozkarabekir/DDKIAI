@@ -348,7 +348,7 @@ def diagnose() -> dict:
     if missing:
         in_file = [k for k in missing if k in config.ENV_KEYS]
         step("AI ayarları", False, "Boş: " + ", ".join(missing) + (" (dosyada satır var ama değer boş)" if in_file else ""),
-             "Bu satırları .env dosyasında doldurun, kaydedin ve uygulamayı yeniden başlatın (terminalde Ctrl+C, sonra uvicorn app.main:app --reload).")
+             "Bu satırları .env dosyasında doldurun, kaydedin ve uygulamayı yeniden başlatın (bilgisayarda: terminalde Ctrl+C, sonra uvicorn app.main:app --reload · sunucuda: bash deploy/servis.sh yeniden).")
         if "AI_BASE_URL" in missing:
             return {"ok": False, "steps": steps}
     else:

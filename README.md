@@ -5,6 +5,7 @@ Trello panosunun yerini alır; dokümanlardan otomatik bilgi çıkarır, kaynakl
 
 - Süreç tasarımı: [`docs/SUREC_TASARIMI.md`](docs/SUREC_TASARIMI.md)
 - Veri mimarisi (doküman bilgi katmanı): [`docs/VERI_MIMARISI.md`](docs/VERI_MIMARISI.md)
+- **Sunucuya kurulum (ekibin kullanımı için):** [`docs/SUNUCU_KURULUMU.md`](docs/SUNUCU_KURULUMU.md)
 
 ## Modüller
 
@@ -42,7 +43,17 @@ uvicorn app.main:app --reload       # http://localhost:8000
 Giriş ekranı kapalıdır (`AUTH_ENABLED=0`); uygulama doğrudan açılır. Uygulamada örnek (demo) veri yoktur: ekranlar yalnızca
 yüklediğiniz dokümanlar, Trello aktarımı ve elle girdiğiniz verilerle dolar.
 
-## DMZ sunucusuna kurulum (Docker)
+## DMZ sunucusuna kurulum
+
+**Docker'sız (önerilen):** adım adım rehber [`docs/SUNUCU_KURULUMU.md`](docs/SUNUCU_KURULUMU.md). Proje klasöründe tek komut:
+
+```bash
+bash deploy/kur.sh          # Python ortamı, paketler, .env, servis (systemd ya da kullanıcı modu), gece yedeği
+bash deploy/servis.sh durum # baslat | durdur | yeniden | log
+bash deploy/guncelle.sh     # yeni sürüm: yedek + paketler + yeniden başlatma
+```
+
+**Docker ile:**
 
 ```bash
 cp .env.example .env                # aşağıdaki "AI bağlantısı" adımlarını uygulayın, SECRET_KEY verin
